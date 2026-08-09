@@ -135,9 +135,9 @@ Notion 인증 정보는 로컬 환경 또는 Git에서 제외된 로컬 설정�
 
 런타임은 생성된 스냅샷만 읽는다. 주요 서비스는 다음과 같다.
 
-- `InteractionRouter`: 조사, 대화, 문, 아이템, 퍼즐 행동 실행
-- `DialogueService`: 대사 그래프 진행과 선택 처리
-- `NarrativeState`: 플래그, 수치, 퀘스트, 인벤토리 상태
+- `InteractionRouter`: 플레이어 씬 안에서 조사, 대화, 문, 아이템, 퍼즐 행동 실행
+- `DialogueService`: `AppRoot/ServiceLayer`에서 대사 그래프 진행과 선택 처리
+- `NarrativeState`: `GameSession`이 소유하는 직렬화 가능한 플래그, 수치, 퀘스트, 인벤토리 데이터
 - `DialogueView`: 하단 대화 UI 표시와 UI 입력 전달
 - `GameSession`: 현재 게임 모드와 입력 권한
 - `SceneDirector`: 맵 전환과 스폰 지점 처리
@@ -184,7 +184,7 @@ res://
 
 Autoload는 다음 세 개만 기본으로 둔다.
 
-- `GameSession`: 모드와 현재 플레이 세션 상태
+- `GameSession`: 모드와 현재 플레이 세션 상태를 관리하고 `NarrativeState`를 소유
 - `SceneDirector`: 맵 수명 주기와 전환
 - `SaveService`: 슬롯과 직렬화
 
@@ -353,17 +353,22 @@ Autoload는 다음 세 개만 기본으로 둔다.
 
 ### 9.1 지속 AppRoot
 
-게임 시작부터 종료까지 `AppRoot`를 유지한다.
+Autoload와 `AppRoot`는 게임 시작부터 종료까지 유지한다. Autoload는 Godot의 `/root` 바로 아래에 있고 `AppRoot`의 자식으로 중복 배치하지 않는다.
 
 ```text
-AppRoot
-├─ GameSession
-├─ WorldHost
-│  └─ CurrentMap
-└─ UILayer
-   ├─ DialogueView
-   ├─ HUD
-   └─ Menus
+/root
+├─ GameSession (Autoload, NarrativeState 소유)
+├─ SceneDirector (Autoload)
+├─ SaveService (Autoload)
+└─ AppRoot
+   ├─ ServiceLayer
+   │  └─ DialogueService
+   ├─ WorldHost
+   │  └─ CurrentMap
+   └─ UILayer
+      ├─ DialogueView
+      ├─ HUD
+      └─ Menus
 ```
 
 `SceneDirector`는 `WorldHost` 안의 현재 맵만 교체한다. 대화 UI와 세션 상태는 맵 전환 중에도 유지된다.
