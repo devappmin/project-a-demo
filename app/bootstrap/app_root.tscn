@@ -1,0 +1,12 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://app/bootstrap/app_root.gd" id="1_app_root"]
+
+[node name="AppRoot" type="Node"]
+script = ExtResource("1_app_root")
+
+[node name="WorldHost" type="Node2D" parent="."]
+
+[node name="ServiceLayer" type="Node" parent="."]
+
+[node name="UILayer" type="CanvasLayer" parent="."]
