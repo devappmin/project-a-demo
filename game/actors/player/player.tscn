@@ -1,0 +1,130 @@
+[gd_scene load_steps=19 format=3]
+
+[ext_resource type="Script" path="res://game/actors/player/player_controller.gd" id="1_controller"]
+[ext_resource type="Texture2D" path="res://assets/sprites/character/character.png" id="2_character"]
+
+[sub_resource type="AtlasTexture" id="Atlas_down_0"]
+atlas = ExtResource("2_character")
+region = Rect2(0, 0, 48, 48)
+
+[sub_resource type="AtlasTexture" id="Atlas_down_1"]
+atlas = ExtResource("2_character")
+region = Rect2(48, 0, 48, 48)
+
+[sub_resource type="AtlasTexture" id="Atlas_down_2"]
+atlas = ExtResource("2_character")
+region = Rect2(96, 0, 48, 48)
+
+[sub_resource type="AtlasTexture" id="Atlas_down_3"]
+atlas = ExtResource("2_character")
+region = Rect2(144, 0, 48, 48)
+
+[sub_resource type="AtlasTexture" id="Atlas_up_0"]
+atlas = ExtResource("2_character")
+region = Rect2(0, 48, 48, 48)
+
+[sub_resource type="AtlasTexture" id="Atlas_up_1"]
+atlas = ExtResource("2_character")
+region = Rect2(48, 48, 48, 48)
+
+[sub_resource type="AtlasTexture" id="Atlas_up_2"]
+atlas = ExtResource("2_character")
+region = Rect2(96, 48, 48, 48)
+
+[sub_resource type="AtlasTexture" id="Atlas_up_3"]
+atlas = ExtResource("2_character")
+region = Rect2(144, 48, 48, 48)
+
+[sub_resource type="AtlasTexture" id="Atlas_right_0"]
+atlas = ExtResource("2_character")
+region = Rect2(0, 96, 48, 48)
+
+[sub_resource type="AtlasTexture" id="Atlas_right_1"]
+atlas = ExtResource("2_character")
+region = Rect2(48, 96, 48, 48)
+
+[sub_resource type="AtlasTexture" id="Atlas_right_2"]
+atlas = ExtResource("2_character")
+region = Rect2(96, 96, 48, 48)
+
+[sub_resource type="AtlasTexture" id="Atlas_right_3"]
+atlas = ExtResource("2_character")
+region = Rect2(144, 96, 48, 48)
+
+[sub_resource type="AtlasTexture" id="Atlas_left_0"]
+atlas = ExtResource("2_character")
+region = Rect2(0, 144, 48, 48)
+
+[sub_resource type="AtlasTexture" id="Atlas_left_1"]
+atlas = ExtResource("2_character")
+region = Rect2(48, 144, 48, 48)
+
+[sub_resource type="AtlasTexture" id="Atlas_left_2"]
+atlas = ExtResource("2_character")
+region = Rect2(96, 144, 48, 48)
+
+[sub_resource type="AtlasTexture" id="Atlas_left_3"]
+atlas = ExtResource("2_character")
+region = Rect2(144, 144, 48, 48)
+
+[sub_resource type="SpriteFrames" id="SpriteFrames_player"]
+animations = [{
+"frames": [{"duration": 1.0, "texture": SubResource("Atlas_down_0")}],
+"loop": true,
+"name": &"idle_down",
+"speed": 5.0
+}, {
+"frames": [{"duration": 1.0, "texture": SubResource("Atlas_left_0")}],
+"loop": true,
+"name": &"idle_left",
+"speed": 5.0
+}, {
+"frames": [{"duration": 1.0, "texture": SubResource("Atlas_right_0")}],
+"loop": true,
+"name": &"idle_right",
+"speed": 5.0
+}, {
+"frames": [{"duration": 1.0, "texture": SubResource("Atlas_up_0")}],
+"loop": true,
+"name": &"idle_up",
+"speed": 5.0
+}, {
+"frames": [{"duration": 1.0, "texture": SubResource("Atlas_down_0")}, {"duration": 1.0, "texture": SubResource("Atlas_down_1")}, {"duration": 1.0, "texture": SubResource("Atlas_down_2")}, {"duration": 1.0, "texture": SubResource("Atlas_down_3")}],
+"loop": true,
+"name": &"walk_down",
+"speed": 8.0
+}, {
+"frames": [{"duration": 1.0, "texture": SubResource("Atlas_left_0")}, {"duration": 1.0, "texture": SubResource("Atlas_left_1")}, {"duration": 1.0, "texture": SubResource("Atlas_left_2")}, {"duration": 1.0, "texture": SubResource("Atlas_left_3")}],
+"loop": true,
+"name": &"walk_left",
+"speed": 8.0
+}, {
+"frames": [{"duration": 1.0, "texture": SubResource("Atlas_right_0")}, {"duration": 1.0, "texture": SubResource("Atlas_right_1")}, {"duration": 1.0, "texture": SubResource("Atlas_right_2")}, {"duration": 1.0, "texture": SubResource("Atlas_right_3")}],
+"loop": true,
+"name": &"walk_right",
+"speed": 8.0
+}, {
+"frames": [{"duration": 1.0, "texture": SubResource("Atlas_up_0")}, {"duration": 1.0, "texture": SubResource("Atlas_up_1")}, {"duration": 1.0, "texture": SubResource("Atlas_up_2")}, {"duration": 1.0, "texture": SubResource("Atlas_up_3")}],
+"loop": true,
+"name": &"walk_up",
+"speed": 8.0
+}]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_feet"]
+size = Vector2(20, 10)
+
+[node name="Player" type="CharacterBody2D"]
+script = ExtResource("1_controller")
+
+[node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="."]
+sprite_frames = SubResource("SpriteFrames_player")
+animation = &"idle_down"
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+position = Vector2(0, 12)
+shape = SubResource("RectangleShape2D_feet")
+
+[node name="InteractionDetector" type="Area2D" parent="."]
+
+[node name="Camera2D" type="Camera2D" parent="."]
+zoom = Vector2(2, 2)
