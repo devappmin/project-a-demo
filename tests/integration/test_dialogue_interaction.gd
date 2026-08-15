@@ -192,7 +192,7 @@ func _test_visible_mirror_keyboard_flow(app: Node, router: InteractionRouter, di
 	var line_count := await _advance_to_choice(dialogue)
 	assert_true(line_count >= 1, "mirror flow presents at least one line before choices")
 	assert_eq(_current_node_type(dialogue), "choice", "keyboard advance reaches a semantic choice boundary")
-	var choices := view.get_node_or_null("Panel/Margin/Layout/Content/ChoiceContainer") as VBoxContainer
+	var choices := view.get_node_or_null("Panel/Margin/Layout/Content/ChoiceScroll/ChoiceContainer") as VBoxContainer
 	assert_not_null(choices, "dialogue view exposes its choice container")
 	if choices == null:
 		dialogue.abort_dialogue(&"test_cleanup")
@@ -267,7 +267,7 @@ func _test_plan3_replacement_snapshot(app: Node, dialogue: DialogueService, view
 	await get_tree().process_frame
 	assert_eq(dialogue.current_node_id, StringName(replacement["entry_node"]), "mirror uses the replacement graph entry instead of a stale local node id")
 	assert_eq(await _advance_to_choice(dialogue), 2, "replacement snapshot can contain multiple lines before its choice")
-	var choices := view.get_node_or_null("Panel/Margin/Layout/Content/ChoiceContainer") as VBoxContainer
+	var choices := view.get_node_or_null("Panel/Margin/Layout/Content/ChoiceScroll/ChoiceContainer") as VBoxContainer
 	assert_not_null(choices, "replacement snapshot reaches the real choice container")
 	if choices == null:
 		if dialogue.current_graph != null:

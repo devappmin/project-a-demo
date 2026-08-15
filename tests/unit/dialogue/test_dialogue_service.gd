@@ -461,7 +461,13 @@ func _test_character_resources_and_view_scene() -> void:
 	var view_items: Array[Dictionary] = [{"text":"First"}, {"text":"Second"}]
 	view.show_choices(view_items)
 	await get_tree().process_frame
-	var choice_container := view.get_node_or_null("Panel/Margin/Layout/Content/ChoiceContainer") as VBoxContainer
+	var choice_scroll := view.get_node_or_null("Panel/Margin/Layout/Content/ChoiceScroll") as ScrollContainer
+	assert_not_null(choice_scroll, "dialogue view bounds choices in a scroll container")
+	if choice_scroll == null:
+		view.queue_free()
+		await get_tree().process_frame
+		return
+	var choice_container := choice_scroll.get_node_or_null("ChoiceContainer") as VBoxContainer
 	assert_not_null(choice_container, "dialogue view exposes its choice container")
 	if choice_container == null:
 		view.queue_free()
@@ -471,12 +477,43 @@ func _test_character_resources_and_view_scene() -> void:
 	if choice_container.get_child_count() >= 2:
 		assert_true(choice_container.get_child(0) is Button and choice_container.get_child(1) is Button, "choices are keyboard focus controls")
 		assert_true(choice_container.get_child(0).has_focus(), "keyboard focus begins on the first choice")
+		assert_true(choice_container.get_child(1).get_global_rect().end.y <= choice_scroll.get_global_rect().end.y, "two ordinary choices fit without clipping or scrolling")
 	var global_previous: int = GameSession.current_mode
 	GameSession.change_mode(GameModeResource.Value.DIALOGUE)
 	if choice_container.get_child_count() >= 1 and choice_container.get_child(0) is Button:
 		choice_container.get_child(0).pressed.emit()
 	GameSession.change_mode(global_previous)
 	assert_eq(_requested_choice_indices, [0], "view emits only the selected visible index")
+	var many_items: Array[Dictionary] = [
+		{"text":"거울 속에서 아주 오래 이어지는 문장을 천천히 읽으며 지금의 선택이 어떤 결과를 만들지 끝까지 신중하게 생각한다"},
+		{"text":"두 번째 선택"},
+		{"text":"세 번째 선택"},
+		{"text":"네 번째 선택"},
+		{"text":"다섯 번째 선택"},
+	]
+	view.show_choices(many_items)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	assert_eq(choice_container.get_child_count(), 5, "many choices render in the bounded container")
+	if choice_container.get_child_count() == 5:
+		var first_button := choice_container.get_child(0) as Button
+		assert_not_null(first_button, "long choice renders as a button")
+		if first_button != null:
+			assert_true(first_button.autowrap_mode != TextServer.AUTOWRAP_OFF, "long choice text wraps")
+			assert_true(first_button.size.y > 24.0, "long Korean choice expands vertically instead of clipping")
+		assert_true(choice_scroll.get_global_rect().end.y <= view.get_global_rect().end.y, "choice scroll stays inside the bottom panel")
+		GameSession.change_mode(GameModeResource.Value.DIALOGUE)
+		for _index: int in 4:
+			_send_action(&"ui_down", true)
+			await get_tree().process_frame
+			_send_action(&"ui_down", false)
+			await get_tree().process_frame
+		var last_button := choice_container.get_child(4) as Button
+		assert_not_null(last_button, "last choice renders as a button")
+		if last_button != null:
+			assert_true(last_button.has_focus(), "keyboard navigation reaches the last choice")
+		assert_true(choice_scroll.scroll_vertical > 0, "scroll follows keyboard focus to the last choice")
+		GameSession.change_mode(global_previous)
 	view.hide_dialogue()
 	var choice_first_items: Array[Dictionary] = [{"text":"Choice-first boundary"}]
 	view.show_choices(choice_first_items)
@@ -561,3 +598,10 @@ func _reset_captures() -> void:
 	_failures.clear()
 	_finished_count = 0
 	_requested_choice_indices.clear()
+
+func _send_action(action: StringName, pressed: bool) -> void:
+	var event := InputEventAction.new()
+	event.action = action
+	event.pressed = pressed
+	event.strength = 1.0 if pressed else 0.0
+	Input.parse_input_event(event)

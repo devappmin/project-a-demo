@@ -77,8 +77,16 @@ size_flags_vertical = 3
 text = "대사"
 autowrap_mode = 2
 
-[node name="ChoiceContainer" type="VBoxContainer" parent="Panel/Margin/Layout/Content"]
+[node name="ChoiceScroll" type="ScrollContainer" parent="Panel/Margin/Layout/Content"]
+custom_minimum_size = Vector2(0, 48)
 layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+follow_focus = true
+
+[node name="ChoiceContainer" type="VBoxContainer" parent="Panel/Margin/Layout/Content/ChoiceScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
 theme_override_constants/separation = 3
 
 [node name="AdvanceIndicator" type="Label" parent="Panel/Margin/Layout/Content"]
