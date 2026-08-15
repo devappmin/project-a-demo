@@ -19,13 +19,38 @@ func run() -> void:
 	assert_eq(EffectExecutor.apply({"kind":"inventory_add", "key":"sandwich", "value":2}, state), OK, "inventory add succeeds")
 	assert_true(ConditionEvaluator.matches({"kind":"inventory", "key":"sandwich", "operator":"gte", "value":2}, state), "inventory condition")
 	assert_eq(EffectExecutor.apply({"kind":"inventory_remove", "key":"sandwich", "value":1}, state), OK, "inventory remove succeeds")
-	assert_eq(state.inventory["sandwich"], 1.0, "inventory removal mutates quantity")
+	assert_eq(state.inventory.get("sandwich", 0.0), 1.0, "inventory removal mutates quantity")
 	assert_eq(EffectExecutor.apply({"kind":"quest_set", "key":"lunch", "value":"started"}, state), OK, "quest set succeeds")
 	assert_true(ConditionEvaluator.matches({"kind":"quest", "key":"lunch", "operator":"eq", "value":"started"}, state), "quest condition")
 	assert_eq(EffectExecutor.apply({"kind":"collectible_add", "key":"recipe", "value":1}, state), OK, "collectible add succeeds")
 	assert_true(ConditionEvaluator.matches({"kind":"collectible", "key":"recipe", "operator":"contains", "value":true}, state), "collectible possession condition")
-	var before_invalid_effect := state.snapshot()
 	assert_false(ConditionEvaluator.matches({"kind":"stat", "key":"corruption", "operator":"contains", "value":"2"}, state), "unsupported condition combination is rejected")
-	assert_eq(EffectExecutor.apply({"kind":"stat_add", "key":"corruption", "value":"1"}, state), ERR_INVALID_DATA, "invalid effect value is rejected")
-	assert_eq(EffectExecutor.apply({"kind":"call", "key":"set_flag", "value":"state.set_flag(&'unsafe', true)"}, state), ERR_INVALID_DATA, "unsupported effect kind is rejected")
-	assert_eq(state.snapshot(), before_invalid_effect, "invalid effects do not mutate state")
+	_test_invalid_effects_do_not_mutate()
+
+func _test_invalid_effects_do_not_mutate() -> void:
+	var cases: Array[Dictionary] = [
+		{"label":"missing shape", "effect":{"kind":"flag_set", "key":"flag"}},
+		{"label":"empty kind", "effect":{"kind":"", "key":"flag", "value":true}},
+		{"label":"empty key", "effect":{"kind":"flag_set", "key":"", "value":true}},
+		{"label":"flag_set value", "effect":{"kind":"flag_set", "key":"flag", "value":1}},
+		{"label":"stat_set value", "effect":{"kind":"stat_set", "key":"stat", "value":"1"}},
+		{"label":"stat_add value", "effect":{"kind":"stat_add", "key":"stat", "value":"1"}},
+		{"label":"stat_add corrupted state", "effect":{"kind":"stat_add", "key":"stat", "value":1}, "section":"stats", "corrupt":"bad"},
+		{"label":"inventory_add negative", "effect":{"kind":"inventory_add", "key":"item", "value":-1}},
+		{"label":"inventory_add corrupted state", "effect":{"kind":"inventory_add", "key":"item", "value":1}, "section":"inventory", "corrupt":"bad"},
+		{"label":"inventory_remove negative", "effect":{"kind":"inventory_remove", "key":"item", "value":-1}},
+		{"label":"inventory_remove corrupted state", "effect":{"kind":"inventory_remove", "key":"item", "value":1}, "section":"inventory", "corrupt":"bad"},
+		{"label":"quest_set value", "effect":{"kind":"quest_set", "key":"quest", "value":&"started"}},
+		{"label":"collectible_add negative", "effect":{"kind":"collectible_add", "key":"item", "value":-1}},
+		{"label":"collectible_add corrupted state", "effect":{"kind":"collectible_add", "key":"item", "value":1}, "section":"collectibles", "corrupt":"bad"},
+		{"label":"unknown kind", "effect":{"kind":"call", "key":"unsafe", "value":"run()"}},
+	]
+	for case: Dictionary in cases:
+		var invalid_state := NarrativeState.new()
+		var section := String(case.get("section", ""))
+		if not section.is_empty():
+			invalid_state.get(section)[String(case["effect"].get("key", ""))] = case.get("corrupt")
+		var before: Dictionary = invalid_state.snapshot()
+		assert_eq(EffectExecutor.apply(case["effect"], invalid_state), ERR_INVALID_DATA, "%s is rejected" % case["label"])
+		assert_eq(invalid_state.snapshot(), before, "%s cannot mutate state" % case["label"])
+	assert_eq(EffectExecutor.apply({"kind":"flag_set", "key":"flag", "value":true}, null), ERR_INVALID_DATA, "null narrative state is rejected")

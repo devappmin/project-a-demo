@@ -2,6 +2,13 @@ extends "res://tests/support/test_case.gd"
 
 const GameMode = preload("res://app/session/game_mode.gd")
 
+class UnhandledInputProbe extends Node:
+	var interact_press_count := 0
+
+	func _unhandled_input(event: InputEvent) -> void:
+		if event.is_action_pressed(&"interact", false):
+			interact_press_count += 1
+
 func run() -> void:
 	_test_directional_ranking()
 	_test_target_payload_is_immutable()
@@ -206,6 +213,8 @@ func _test_scene_detector_query() -> void:
 
 func _test_edge_triggered_input_and_prompt_updates() -> void:
 	var host := Node.new()
+	var probe := UnhandledInputProbe.new()
+	host.add_child(probe)
 	var detector := InteractionDetector.new()
 	detector.name = "Detector"
 	host.add_child(detector)
@@ -232,9 +241,9 @@ func _test_edge_triggered_input_and_prompt_updates() -> void:
 	assert_true(prompt.visible, "prompt reappears when exploration restores interaction permission")
 
 	var requested: Array[Dictionary] = []
-	router.action_requested.connect(func(_kind: StringName, _payload: Dictionary) -> void:
+	var request_handler := func(_kind: StringName, _payload: Dictionary) -> void:
 		requested.append({"kind": _kind, "payload": _payload})
-	)
+	router.action_requested.connect(request_handler)
 	assert_true(router.has_method("_unhandled_input"), "router handles interaction through edge-triggered input events")
 	if router.has_method("_unhandled_input"):
 		var press := InputEventKey.new()
@@ -249,7 +258,42 @@ func _test_edge_triggered_input_and_prompt_updates() -> void:
 	assert_eq(requested.size(), 1, "one E press emits at most one action even when a key echo follows")
 
 	detector.current_target = null
+	probe.interact_press_count = 0
+	_send_key(KEY_E, true)
+	await get_tree().process_frame
+	_send_key(KEY_E, false)
+	await get_tree().process_frame
+	assert_eq(probe.interact_press_count, 1, "rejected input without a current target remains reusable")
+	assert_eq(requested.size(), 1, "rejected input emits no action")
+
+	detector.current_target = target
+	GameSession.change_mode(GameMode.Value.DIALOGUE)
+	probe.interact_press_count = 0
+	_send_key(KEY_E, true)
+	await get_tree().process_frame
+	_send_key(KEY_E, false)
+	await get_tree().process_frame
+	assert_eq(probe.interact_press_count, 1, "unauthorized interaction input remains reusable")
+	assert_eq(requested.size(), 1, "unauthorized interaction emits no action")
+
+	GameSession.change_mode(GameMode.Value.EXPLORATION)
+	router.action_requested.disconnect(request_handler)
+	probe.interact_press_count = 0
+	_send_key(KEY_E, true)
+	await get_tree().process_frame
+	_send_key(KEY_E, false)
+	await get_tree().process_frame
+	assert_eq(probe.interact_press_count, 0, "a successful valid target is deliberately consumed even with no listeners")
+	assert_eq(requested.size(), 1, "no-listener consumption cannot fabricate an action observation")
+
+	detector.current_target = null
 	assert_false(prompt.visible, "prompt hides when the detector loses its target")
 	target.free()
 	host.queue_free()
 	await get_tree().process_frame
+
+func _send_key(keycode: Key, pressed: bool) -> void:
+	var event := InputEventKey.new()
+	event.keycode = keycode
+	event.pressed = pressed
+	Input.parse_input_event(event)

@@ -11,16 +11,27 @@ func run() -> void:
 	assert_eq(state.get_stat(&"corruption"), 2.0, "stat is stored by key")
 	state.inventory["lunch"] = {"sandwich": 1}
 	var snapshot := state.snapshot()
-	snapshot["inventory"]["lunch"]["sandwich"] = 2
-	assert_eq(state.inventory["lunch"]["sandwich"], 1, "snapshot does not share nested inventory data")
+	var snapshot_inventory_value: Variant = snapshot.get("inventory", {})
+	assert_true(typeof(snapshot_inventory_value) == TYPE_DICTIONARY, "snapshot contains an inventory dictionary")
+	if typeof(snapshot_inventory_value) == TYPE_DICTIONARY and typeof(snapshot_inventory_value.get("lunch")) == TYPE_DICTIONARY:
+		snapshot_inventory_value["lunch"]["sandwich"] = 2
+	var state_lunch_value: Variant = state.inventory.get("lunch", {})
+	assert_true(typeof(state_lunch_value) == TYPE_DICTIONARY, "state retains its nested lunch inventory")
+	if typeof(state_lunch_value) == TYPE_DICTIONARY:
+		assert_eq(state_lunch_value.get("sandwich", 0), 1, "snapshot does not share nested inventory data")
 	var restored := NarrativeState.new()
 	assert_eq(restored.restore(state.snapshot()), OK, "snapshot restores")
 	assert_eq(restored.snapshot(), state.snapshot(), "round trip is exact")
 	var restore_source := state.snapshot()
 	var isolated_restore := NarrativeState.new()
 	assert_eq(isolated_restore.restore(restore_source), OK, "restore accepts a valid snapshot")
-	restore_source["inventory"]["lunch"]["sandwich"] = 3
-	assert_eq(isolated_restore.inventory["lunch"]["sandwich"], 1, "restore does not share nested input data")
+	var restore_inventory_value: Variant = restore_source.get("inventory", {})
+	if typeof(restore_inventory_value) == TYPE_DICTIONARY and typeof(restore_inventory_value.get("lunch")) == TYPE_DICTIONARY:
+		restore_inventory_value["lunch"]["sandwich"] = 3
+	var isolated_lunch_value: Variant = isolated_restore.inventory.get("lunch", {})
+	assert_true(typeof(isolated_lunch_value) == TYPE_DICTIONARY, "restored state contains its nested lunch inventory")
+	if typeof(isolated_lunch_value) == TYPE_DICTIONARY:
+		assert_eq(isolated_lunch_value.get("sandwich", 0), 1, "restore does not share nested input data")
 	var before_invalid_restore := restored.snapshot()
 	assert_eq(restored.restore({"flags": {}, "stats": [], "inventory": {}, "quests": {}, "collectibles": {}}), ERR_INVALID_DATA, "restore rejects a non-dictionary section")
 	assert_eq(restored.snapshot(), before_invalid_restore, "invalid restore leaves state unchanged")

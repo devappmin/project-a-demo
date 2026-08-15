@@ -29,6 +29,9 @@ func _validate_fixture_contract(validator: Variant) -> void:
 	assert_eq(_validate(validator, valid, [&"retti", &"jellyppo"]), [], "valid graph has no issues")
 	var broken: Variant = JSON.parse_string(FileAccess.get_file_as_string("res://tests/fixtures/dialogues/dangling_target.json"))
 	var issues: Array = _validate(validator, broken, [&"retti"])
+	assert_true(not issues.is_empty(), "broken fixture produces at least one issue")
+	if issues.is_empty():
+		return
 	assert_eq(issues[0]["code"], "dangling_target", "broken target is reported first")
 	assert_eq(issues[0]["node_id"], "line_1", "broken target identifies its node")
 	for issue: Dictionary in issues:
@@ -133,14 +136,25 @@ func _validate_automatic_path_limit(validator: Variant) -> void:
 	assert_true(_has_code_at(_validate(validator, rejected, [&"retti"]), "automatic_path_too_long", "jump_0"), "257 automatic nodes are rejected from their possible entry override")
 
 func _validate_graph_immutability(graph_script: Variant) -> void:
-	var source: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://tests/fixtures/dialogues/valid_branch.json"))
+	var source_value: Variant = JSON.parse_string(FileAccess.get_file_as_string("res://tests/fixtures/dialogues/valid_branch.json"))
+	assert_true(typeof(source_value) == TYPE_DICTIONARY, "immutable graph fixture parses as a dictionary")
+	if typeof(source_value) != TYPE_DICTIONARY:
+		return
+	var source: Dictionary = source_value
 	var graph: Variant = graph_script.from_dictionary(source)
+	assert_not_null(graph, "immutable graph can be constructed")
+	if graph == null:
+		return
 	source["nodes"]["line_1"]["text"] = "mutated source"
 	var node: Dictionary = graph.get_node(&"line_1")
-	assert_eq(node["text"], "낯선 거울이다.", "graph deep-copies its source")
+	assert_eq(node.get("text", ""), "낯선 거울이다.", "graph deep-copies its source")
 	node["text"] = "mutated getter"
-	graph.nodes["line_1"]["text"] = "mutated property"
-	assert_eq(graph.get_node(&"line_1")["text"], "낯선 거울이다.", "graph never exposes mutable node storage")
+	var public_nodes: Dictionary = graph.nodes
+	var public_line_value: Variant = public_nodes.get("line_1", {})
+	assert_true(typeof(public_line_value) == TYPE_DICTIONARY, "graph node property contains the fixture line")
+	if typeof(public_line_value) == TYPE_DICTIONARY:
+		public_line_value["text"] = "mutated property"
+	assert_eq(graph.get_node(&"line_1").get("text", ""), "낯선 거울이다.", "graph never exposes mutable node storage")
 	graph.scene_key = &"mutated"
 	graph.entry_node = &"mutated"
 	assert_eq(graph.scene_key, &"valid.branch", "graph scene keys are immutable")
@@ -155,23 +169,24 @@ func _validate_loader(loader_script: Variant) -> void:
 	loader.character_keys = loader_characters
 	var graph: Variant = loader.load_scene(&"valid.branch")
 	assert_not_null(graph, "loader resolves dotted scene keys below its base directory")
-	assert_eq(graph.scene_key, &"valid.branch", "loaded graph retains the requested scene key")
+	if graph != null:
+		assert_eq(graph.scene_key, &"valid.branch", "loaded graph retains the requested scene key")
 	var unicode_graph: Variant = loader.load_scene(StringName(".장면."))
 	assert_not_null(unicode_graph, "loader accepts confined Unicode scene keys with safe edge dots")
 	if unicode_graph != null:
 		assert_eq(unicode_graph.scene_key, StringName(".장면."), "loader preserves the Unicode scene key while mapping dots in its filename")
 	assert_eq(loader.load_scene(&"dangling.target"), null, "loader never returns a graph that failed validation")
-	assert_eq(loader.last_failure["code"], "validation_failed", "loader reports validation failure")
+	assert_eq(loader.last_failure.get("code", ""), "validation_failed", "loader reports validation failure")
 	assert_eq(loader.load_scene(&"malformed"), null, "loader rejects malformed JSON")
-	assert_eq(loader.last_failure["code"], "parse_failed", "loader reports parse failure")
+	assert_eq(loader.last_failure.get("code", ""), "parse_failed", "loader reports parse failure")
 	assert_eq(loader.load_scene(&"mismatched"), null, "loader rejects a payload for a different requested scene")
 	assert_eq(loader.last_failure.get("code", ""), "validation_failed", "loader reports scene identity validation failure")
 	assert_eq(loader.load_scene(&"missing"), null, "loader rejects missing scene files")
-	assert_eq(loader.last_failure["code"], "load_failed", "loader reports load failure")
+	assert_eq(loader.last_failure.get("code", ""), "load_failed", "loader reports load failure")
 	assert_eq(loader.load_scene(StringName("../valid.branch")), null, "loader rejects path separators in scene keys")
-	assert_eq(loader.last_failure["code"], "unsafe_scene_key", "loader reports unsafe scene keys")
+	assert_eq(loader.last_failure.get("code", ""), "unsafe_scene_key", "loader reports unsafe scene keys")
 	assert_eq(loader.load_scene(StringName("..\\valid.branch")), null, "loader rejects Windows path separators in scene keys")
-	assert_eq(loader.last_failure["code"], "unsafe_scene_key", "loader reports unsafe Windows scene keys")
+	assert_eq(loader.last_failure.get("code", ""), "unsafe_scene_key", "loader reports unsafe Windows scene keys")
 
 func _validate_loader_control_flow_contract(loader_script: Variant) -> void:
 	var output_directory := "user://test-output/dialogue-validator-%s" % Time.get_ticks_usec()
@@ -232,20 +247,20 @@ func _validate(validator: Variant, data: Dictionary, characters: Array[StringNam
 	return validator.validate(data, characters)
 
 func _has_code(issues: Array, code: String) -> bool:
-	for issue: Dictionary in issues:
-		if issue["code"] == code:
+	for issue_value: Variant in issues:
+		if typeof(issue_value) == TYPE_DICTIONARY and issue_value.get("code", "") == code:
 			return true
 	return false
 
 func _count_code(issues: Array, code: String) -> int:
 	var count := 0
-	for issue: Dictionary in issues:
-		if issue["code"] == code:
+	for issue_value: Variant in issues:
+		if typeof(issue_value) == TYPE_DICTIONARY and issue_value.get("code", "") == code:
 			count += 1
 	return count
 
 func _has_code_at(issues: Array, code: String, node_id: String) -> bool:
-	for issue: Dictionary in issues:
-		if issue["code"] == code and issue["node_id"] == node_id:
+	for issue_value: Variant in issues:
+		if typeof(issue_value) == TYPE_DICTIONARY and issue_value.get("code", "") == code and issue_value.get("node_id", "") == node_id:
 			return true
 	return false

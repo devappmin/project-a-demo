@@ -72,7 +72,9 @@ func _test_load_and_entry_failures_preserve_mode(service_script: Variant) -> voi
 	var service: Variant = _configured_service(service_script, missing_loader, session)
 	assert_eq(service.start_dialogue(&"missing"), ERR_CANT_OPEN, "load failure is returned")
 	assert_eq(session.current_mode, GameModeResource.Value.PAUSED, "load failure never enters dialogue")
-	assert_eq(_failures[-1].get("reason"), &"load_failed", "load failure has stable context")
+	assert_true(not _failures.is_empty(), "load failure emits failure context")
+	if not _failures.is_empty():
+		assert_eq(_failures[-1].get("reason"), &"load_failed", "load failure has stable context")
 	service.free()
 
 	_reset_captures()
@@ -103,7 +105,9 @@ func _test_end_and_abort_restore_exact_mode(service_script: Variant) -> void:
 	assert_eq(service.start_dialogue(&"abortable"), OK, "abortable dialogue starts")
 	service.abort_dialogue(&"test_cleanup")
 	assert_eq(session.current_mode, GameModeResource.Value.MENU, "abort restores exact prior menu mode")
-	assert_eq(_failures[-1].get("reason"), &"test_cleanup", "abort reports its reason")
+	assert_true(not _failures.is_empty(), "abort emits failure context")
+	if not _failures.is_empty():
+		assert_eq(_failures[-1].get("reason"), &"test_cleanup", "abort reports its reason")
 	assert_eq(service.get_checkpoint(), {}, "abort clears the active checkpoint")
 	service.free()
 	session.free()
@@ -124,7 +128,14 @@ func _test_automatic_dispatch_and_guard(service_script: Variant) -> void:
 	assert_eq(service.current_node_id, &"line", "command effect and jump chain to line boundary")
 	assert_true(session.narrative_state.get_flag(&"chain_seen"), "automatic effect is applied")
 	assert_eq(_commands.size(), 1, "automatic command is requested")
-	assert_eq(graph.get_node(&"command")["command"]["payload"]["shake"], 1, "command signal mutation cannot alter graph data")
+	var command_node := graph.get_node(&"command")
+	var command_value: Variant = command_node.get("command", {})
+	assert_true(typeof(command_value) == TYPE_DICTIONARY, "command graph retains a dictionary payload")
+	if typeof(command_value) == TYPE_DICTIONARY:
+		var payload_value: Variant = command_value.get("payload", {})
+		assert_true(typeof(payload_value) == TYPE_DICTIONARY, "command graph retains its nested payload")
+		if typeof(payload_value) == TYPE_DICTIONARY:
+			assert_eq(payload_value.get("shake", 0), 1, "command signal mutation cannot alter graph data")
 	service.advance()
 	assert_eq(session.current_mode, GameModeResource.Value.CUTSCENE, "automatic chain end restores cutscene")
 	service.free()
@@ -174,7 +185,9 @@ func _test_start_and_advance_automatic_transactions(service_script: Variant) -> 
 	service = _service_for_graph(service_script, _graph("guard", "jump_0", guard_nodes), session)
 	assert_eq(service.start_dialogue(&"guard"), ERR_CYCLIC_LINK, "257 automatic nodes trip the dispatch guard")
 	assert_eq(session.current_mode, GameModeResource.Value.PAUSED, "guard failure restores prior mode")
-	assert_eq(_failures[-1].get("reason"), &"dispatch_guard", "guard failure has stable context")
+	assert_true(not _failures.is_empty(), "dispatch guard emits failure context")
+	if not _failures.is_empty():
+		assert_eq(_failures[-1].get("reason"), &"dispatch_guard", "guard failure has stable context")
 	service.free()
 	session.free()
 
@@ -207,7 +220,9 @@ func _test_choice_filtering_index_stability_and_checkpoint(service_script: Varia
 	var session := _session_in_mode(GameModeResource.Value.EXPLORATION)
 	var service: Variant = _service_for_graph(service_script, _graph("choices", "choice", nodes), session)
 	assert_eq(service.start_dialogue(&"choices"), OK, "choice-first dialogue starts")
-	assert_eq(_choices[-1].map(func(item: Dictionary) -> String: return item["text"]), ["first visible", "second visible"], "filtered choices preserve visible order")
+	assert_true(not _choices.is_empty(), "choice-first dialogue publishes visible choices")
+	if not _choices.is_empty():
+		assert_eq(_choices[-1].map(func(item: Dictionary) -> String: return String(item.get("text", ""))), ["first visible", "second visible"], "filtered choices preserve visible order")
 	var before_invalid: Dictionary = session.narrative_state.snapshot()
 	var checkpoint_before: Dictionary = service.get_checkpoint()
 	assert_eq(service.choose(-1), ERR_INVALID_PARAMETER, "negative filtered choice index is rejected")
@@ -223,7 +238,7 @@ func _test_choice_filtering_index_stability_and_checkpoint(service_script: Varia
 	var checkpoint: Dictionary = service.get_checkpoint()
 	assert_eq(checkpoint, {"scene_key":"choices", "next_node_id":"after"}, "checkpoint identifies active scene and stable node")
 	checkpoint["next_node_id"] = "mutated"
-	assert_eq(service.get_checkpoint()["next_node_id"], "after", "checkpoint callers cannot mutate service state")
+	assert_eq(service.get_checkpoint().get("next_node_id", ""), "after", "checkpoint callers cannot mutate service state")
 	service.abort_dialogue(&"test_cleanup")
 	service.free()
 	session.free()
@@ -415,15 +430,28 @@ func _test_character_resources_and_view_scene() -> void:
 	assert_true(retti.resolve_portrait(&"neutral") is AtlasTexture, "draft neutral portrait is a nondestructive atlas crop")
 	assert_eq(retti.resolve_portrait(&"missing"), retti.resolve_portrait(retti.default_expression), "unknown expression falls back to default portrait")
 	var view_scene := load(VIEW_SCENE_PATH) as PackedScene
+	assert_not_null(view_scene, "dialogue view scene loads for behavioral UI checks")
+	if view_scene == null:
+		return
 	var view: Variant = view_scene.instantiate()
+	assert_not_null(view, "dialogue view scene instantiates")
+	if view == null:
+		return
 	add_child(view)
 	await get_tree().process_frame
 	assert_true(view.anchor_left == 0.0 and view.anchor_right == 1.0 and view.anchor_top == 1.0 and view.anchor_bottom == 1.0, "dialogue view is bottom anchored")
 	view.show_line(&"retti", &"uneasy", "A line that must not overlap the portrait.")
 	await get_tree().process_frame
-	var portrait := view.get_node("Panel/Margin/Layout/Portrait") as TextureRect
-	var name_label := view.get_node("Panel/Margin/Layout/Content/NameLabel") as Label
-	var text_label := view.get_node("Panel/Margin/Layout/Content/TextLabel") as Label
+	var portrait := view.get_node_or_null("Panel/Margin/Layout/Portrait") as TextureRect
+	var name_label := view.get_node_or_null("Panel/Margin/Layout/Content/NameLabel") as Label
+	var text_label := view.get_node_or_null("Panel/Margin/Layout/Content/TextLabel") as Label
+	assert_not_null(portrait, "dialogue view exposes its portrait control")
+	assert_not_null(name_label, "dialogue view exposes its name label")
+	assert_not_null(text_label, "dialogue view exposes its text label")
+	if portrait == null or name_label == null or text_label == null:
+		view.queue_free()
+		await get_tree().process_frame
+		return
 	assert_eq(name_label.text, retti.display_name, "view resolves speaker display name")
 	assert_eq(portrait.texture, retti.resolve_portrait(&"uneasy"), "view resolves the requested expression")
 	assert_true(portrait.get_global_rect().end.x <= name_label.get_global_rect().position.x, "portrait does not overlap dialogue text")
@@ -433,13 +461,20 @@ func _test_character_resources_and_view_scene() -> void:
 	var view_items: Array[Dictionary] = [{"text":"First"}, {"text":"Second"}]
 	view.show_choices(view_items)
 	await get_tree().process_frame
-	var choice_container := view.get_node("Panel/Margin/Layout/Content/ChoiceContainer") as VBoxContainer
+	var choice_container := view.get_node_or_null("Panel/Margin/Layout/Content/ChoiceContainer") as VBoxContainer
+	assert_not_null(choice_container, "dialogue view exposes its choice container")
+	if choice_container == null:
+		view.queue_free()
+		await get_tree().process_frame
+		return
 	assert_eq(choice_container.get_child_count(), 2, "choices render vertically")
-	assert_true(choice_container.get_child(0) is Button and choice_container.get_child(1) is Button, "choices are keyboard focus controls")
-	assert_true(choice_container.get_child(0).has_focus(), "keyboard focus begins on the first choice")
+	if choice_container.get_child_count() >= 2:
+		assert_true(choice_container.get_child(0) is Button and choice_container.get_child(1) is Button, "choices are keyboard focus controls")
+		assert_true(choice_container.get_child(0).has_focus(), "keyboard focus begins on the first choice")
 	var global_previous: int = GameSession.current_mode
 	GameSession.change_mode(GameModeResource.Value.DIALOGUE)
-	choice_container.get_child(0).pressed.emit()
+	if choice_container.get_child_count() >= 1 and choice_container.get_child(0) is Button:
+		choice_container.get_child(0).pressed.emit()
 	GameSession.change_mode(global_previous)
 	assert_eq(_requested_choice_indices, [0], "view emits only the selected visible index")
 	view.hide_dialogue()
@@ -453,7 +488,13 @@ func _test_character_resources_and_view_scene() -> void:
 	await get_tree().process_frame
 
 	var app_scene := load("res://app/bootstrap/app_root.tscn") as PackedScene
+	assert_not_null(app_scene, "AppRoot scene loads for dialogue composition checks")
+	if app_scene == null:
+		return
 	var app := app_scene.instantiate()
+	assert_not_null(app, "AppRoot scene instantiates for dialogue composition checks")
+	if app == null:
+		return
 	var service := app.get_node_or_null("ServiceLayer/DialogueService")
 	var app_view := app.get_node_or_null("UILayer/DialogueView")
 	assert_not_null(service, "AppRoot owns the dialogue service without an autoload")

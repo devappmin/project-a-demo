@@ -19,13 +19,37 @@ func run() -> void:
 	probe.name = "UnhandledInputProbe"
 	get_tree().root.add_child(probe)
 	var app_scene := load("res://app/bootstrap/app_root.tscn") as PackedScene
+	assert_not_null(app_scene, "AppRoot scene loads for dialogue integration")
+	if app_scene == null:
+		probe.queue_free()
+		await get_tree().process_frame
+		GameSession.narrative_state = previous_state
+		GameSession.change_mode(previous_mode)
+		return
 	var app := app_scene.instantiate()
+	assert_not_null(app, "AppRoot scene instantiates for dialogue integration")
+	if app == null:
+		probe.queue_free()
+		await get_tree().process_frame
+		GameSession.narrative_state = previous_state
+		GameSession.change_mode(previous_mode)
+		return
 	get_tree().root.add_child(app)
 	await get_tree().process_frame
 
-	var router := app.get_node("WorldHost/FoundationRoom/Player/InteractionRouter") as InteractionRouter
-	var dialogue := app.get_node("ServiceLayer/DialogueService") as DialogueService
-	var view := app.get_node("UILayer/DialogueView") as DialogueView
+	var router := app.get_node_or_null("WorldHost/FoundationRoom/Player/InteractionRouter") as InteractionRouter
+	var dialogue := app.get_node_or_null("ServiceLayer/DialogueService") as DialogueService
+	var view := app.get_node_or_null("UILayer/DialogueView") as DialogueView
+	assert_not_null(router, "real AppRoot exposes its player interaction router")
+	assert_not_null(dialogue, "real AppRoot exposes its dialogue service")
+	assert_not_null(view, "real AppRoot exposes its dialogue view")
+	if router == null or dialogue == null or view == null:
+		app.queue_free()
+		probe.queue_free()
+		await get_tree().process_frame
+		GameSession.narrative_state = previous_state
+		GameSession.change_mode(previous_mode)
+		return
 	var adapter := app.get_node_or_null("ServiceLayer/DialogueActionAdapter")
 	_test_single_app_composition(router, dialogue, adapter)
 	_test_production_fixture_is_immutable()
@@ -77,8 +101,10 @@ func _test_production_fixture_is_immutable() -> void:
 		return
 	items[0]["text"] = "mutated"
 	var unchanged := graph.get_node(choice_id)
-	var unchanged_items: Array = unchanged.get("items", [])
-	assert_eq(unchanged_items[0].get("text", ""), original_text, "fixture choices are returned as deep copies")
+	var unchanged_items_value: Variant = unchanged.get("items", [])
+	assert_true(typeof(unchanged_items_value) == TYPE_ARRAY and not unchanged_items_value.is_empty(), "immutable graph still returns its choice items")
+	if typeof(unchanged_items_value) == TYPE_ARRAY and not unchanged_items_value.is_empty() and typeof(unchanged_items_value[0]) == TYPE_DICTIONARY:
+		assert_eq(unchanged_items_value[0].get("text", ""), original_text, "fixture choices are returned as deep copies")
 
 func _test_invalid_adapter_payloads_are_ignored(router: InteractionRouter, dialogue: DialogueService) -> void:
 	var invalid_requests: Array[Dictionary] = [
@@ -104,11 +130,22 @@ func _test_talk_payload_starts_and_abort_restores(router: InteractionRouter, dia
 	assert_false(view.visible, "abort hides the dialogue view")
 
 func _test_visible_mirror_keyboard_flow(app: Node, router: InteractionRouter, dialogue: DialogueService, view: DialogueView, probe: UnhandledInputProbe) -> void:
-	var room := app.get_node("WorldHost/FoundationRoom") as MapScene
-	var player := room.get_node("Player") as PlayerController
-	var detector := player.get_node("InteractionDetector") as InteractionDetector
-	var mirror := room.get_node("VisualSort/SampleInspectable") as InteractionTarget
-	var prompt := app.get_node("UILayer/InteractionPrompt") as InteractionPrompt
+	var room := app.get_node_or_null("WorldHost/FoundationRoom") as MapScene
+	var prompt := app.get_node_or_null("UILayer/InteractionPrompt") as InteractionPrompt
+	assert_not_null(room, "AppRoot exposes the foundation room")
+	assert_not_null(prompt, "AppRoot exposes the interaction prompt")
+	if room == null or prompt == null:
+		return
+	var player := room.get_node_or_null("Player") as PlayerController
+	var mirror := room.get_node_or_null("VisualSort/SampleInspectable") as InteractionTarget
+	assert_not_null(player, "foundation room exposes its player")
+	assert_not_null(mirror, "foundation room exposes its mirror")
+	if player == null or mirror == null:
+		return
+	var detector := player.get_node_or_null("InteractionDetector") as InteractionDetector
+	assert_not_null(detector, "player exposes its interaction detector")
+	if detector == null:
+		return
 	var interaction := mirror.get_interaction()
 	assert_eq(interaction.kind, &"inspect", "mirror requests inspection")
 	assert_eq(interaction.payload, {"scene_key":&"foundation.inspect"}, "mirror defers normal entry to the compiled graph")
@@ -120,7 +157,10 @@ func _test_visible_mirror_keyboard_flow(app: Node, router: InteractionRouter, di
 	await get_tree().physics_frame
 	assert_eq(detector.current_target, mirror, "front-facing mirror becomes the current target")
 	assert_true(prompt.visible, "front-facing mirror shows its prompt")
-	assert_eq(prompt.get_node("PanelContainer/PromptLabel").text, "거울 조사하기 [E]", "mirror prompt names the interaction key")
+	var prompt_label := prompt.get_node_or_null("PanelContainer/PromptLabel") as Label
+	assert_not_null(prompt_label, "interaction prompt exposes its label")
+	if prompt_label != null:
+		assert_eq(prompt_label.text, "거울 조사하기 [E]", "mirror prompt names the interaction key")
 
 	probe.interact_press_count = 0
 	_send_key(KEY_E, true)
@@ -134,17 +174,29 @@ func _test_visible_mirror_keyboard_flow(app: Node, router: InteractionRouter, di
 	assert_eq(router.execute_target(mirror), ERR_UNAUTHORIZED, "router continues to enforce session interaction permissions")
 	assert_false(prompt.visible, "dialogue mode hides the world interaction prompt")
 	assert_true(view.visible, "dialogue view is visible after mirror interaction")
-	assert_eq(view.get_node("Panel/Margin/Layout/Content/NameLabel").text, "레티", "mirror line resolves the speaker name")
-	assert_false(String(view.get_node("Panel/Margin/Layout/Content/TextLabel").text).is_empty(), "mirror entry renders line text")
+	var name_label := view.get_node_or_null("Panel/Margin/Layout/Content/NameLabel") as Label
+	var text_label := view.get_node_or_null("Panel/Margin/Layout/Content/TextLabel") as Label
+	var portrait := view.get_node_or_null("Panel/Margin/Layout/Portrait") as TextureRect
+	assert_not_null(name_label, "dialogue view exposes its name label")
+	assert_not_null(text_label, "dialogue view exposes its text label")
+	assert_not_null(portrait, "dialogue view exposes its portrait")
+	if name_label != null:
+		assert_eq(name_label.text, "레티", "mirror line resolves the speaker name")
+	if text_label != null:
+		assert_false(text_label.text.is_empty(), "mirror entry renders line text")
 	var retti: Resource = load("res://data/characters/retti.tres")
 	assert_not_null(retti, "retti character resource loads for the mirror line")
-	if retti != null:
-		assert_not_null(view.get_node("Panel/Margin/Layout/Portrait").texture, "mirror line renders a portrait")
+	if retti != null and portrait != null:
+		assert_not_null(portrait.texture, "mirror line renders a portrait")
 
 	var line_count := await _advance_to_choice(dialogue)
 	assert_true(line_count >= 1, "mirror flow presents at least one line before choices")
 	assert_eq(_current_node_type(dialogue), "choice", "keyboard advance reaches a semantic choice boundary")
-	var choices := view.get_node("Panel/Margin/Layout/Content/ChoiceContainer") as VBoxContainer
+	var choices := view.get_node_or_null("Panel/Margin/Layout/Content/ChoiceContainer") as VBoxContainer
+	assert_not_null(choices, "dialogue view exposes its choice container")
+	if choices == null:
+		dialogue.abort_dialogue(&"test_cleanup")
+		return
 	assert_true(choices.get_child_count() >= 1, "mirror dialogue renders visible choices")
 	if choices.get_child_count() >= 1:
 		assert_true(choices.get_child(0).has_focus(), "keyboard focus begins on the first mirror choice")
@@ -194,9 +246,16 @@ func _test_plan3_replacement_snapshot(app: Node, dialogue: DialogueService, view
 	loader.base_directory = output_directory
 	dialogue.graph_loader = loader
 	GameSession.narrative_state.set_flag(&"mirror_seen", false)
-	var room := app.get_node("WorldHost/FoundationRoom") as MapScene
-	var player := room.get_node("Player") as PlayerController
-	var mirror := room.get_node("VisualSort/SampleInspectable") as InteractionTarget
+	var room := app.get_node_or_null("WorldHost/FoundationRoom") as MapScene
+	assert_not_null(room, "replacement snapshot uses the real foundation room")
+	if room == null:
+		return
+	var player := room.get_node_or_null("Player") as PlayerController
+	var mirror := room.get_node_or_null("VisualSort/SampleInspectable") as InteractionTarget
+	assert_not_null(player, "replacement snapshot uses the real player")
+	assert_not_null(mirror, "replacement snapshot uses the real mirror")
+	if player == null or mirror == null:
+		return
 	player.position = mirror.position - Vector2(32, 0)
 	player.facing = Vector2.RIGHT
 	await get_tree().physics_frame
@@ -208,7 +267,15 @@ func _test_plan3_replacement_snapshot(app: Node, dialogue: DialogueService, view
 	await get_tree().process_frame
 	assert_eq(dialogue.current_node_id, StringName(replacement["entry_node"]), "mirror uses the replacement graph entry instead of a stale local node id")
 	assert_eq(await _advance_to_choice(dialogue), 2, "replacement snapshot can contain multiple lines before its choice")
-	var choices := view.get_node("Panel/Margin/Layout/Content/ChoiceContainer") as VBoxContainer
+	var choices := view.get_node_or_null("Panel/Margin/Layout/Content/ChoiceContainer") as VBoxContainer
+	assert_not_null(choices, "replacement snapshot reaches the real choice container")
+	if choices == null:
+		if dialogue.current_graph != null:
+			dialogue.abort_dialogue(&"test_cleanup")
+		dialogue.graph_loader = DialogueGraphLoader.new()
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(snapshot_path))
+		DirAccess.remove_absolute(absolute_directory)
+		return
 	assert_eq(choices.get_child_count(), 2, "replacement snapshot publishes its choices")
 	if choices.get_child_count() == 2:
 		choices.get_child(0).pressed.emit()
