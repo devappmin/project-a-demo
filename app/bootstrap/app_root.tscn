@@ -1,10 +1,11 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene load_steps=7 format=3]
 
 [ext_resource type="Script" path="res://app/bootstrap/app_root.gd" id="1_app_root"]
 [ext_resource type="PackedScene" path="res://content/maps/foundation_room.tscn" id="2_room"]
 [ext_resource type="PackedScene" path="res://ui/hud/interaction_prompt.tscn" id="3_prompt"]
 [ext_resource type="Script" path="res://game/narrative/dialogue/dialogue_service.gd" id="4_dialogue_service"]
 [ext_resource type="PackedScene" path="res://ui/dialogue/dialogue_view.tscn" id="5_dialogue_view"]
+[ext_resource type="Script" path="res://game/interaction/dialogue_action_adapter.gd" id="6_dialogue_adapter"]
 
 [node name="AppRoot" type="Node"]
 script = ExtResource("1_app_root")
@@ -18,6 +19,10 @@ script = ExtResource("1_app_root")
 [node name="DialogueService" type="Node" parent="ServiceLayer"]
 script = ExtResource("4_dialogue_service")
 
+[node name="DialogueActionAdapter" type="Node" parent="ServiceLayer"]
+script = ExtResource("6_dialogue_adapter")
+dialogue_service_path = NodePath("../DialogueService")
+
 [node name="UILayer" type="CanvasLayer" parent="."]
 
 [node name="InteractionPrompt" parent="UILayer" instance=ExtResource("3_prompt")]
@@ -29,5 +34,6 @@ detector_path = NodePath("../../WorldHost/FoundationRoom/Player/InteractionDetec
 [connection signal="choices_requested" from="ServiceLayer/DialogueService" to="UILayer/DialogueView" method="show_choices"]
 [connection signal="finished" from="ServiceLayer/DialogueService" to="UILayer/DialogueView" method="hide_dialogue"]
 [connection signal="failed" from="ServiceLayer/DialogueService" to="UILayer/DialogueView" method="hide_dialogue"]
+[connection signal="action_requested" from="WorldHost/FoundationRoom/Player/InteractionRouter" to="ServiceLayer/DialogueActionAdapter" method="handle_action"]
 [connection signal="advance_requested" from="UILayer/DialogueView" to="ServiceLayer/DialogueService" method="advance"]
 [connection signal="choice_requested" from="UILayer/DialogueView" to="ServiceLayer/DialogueService" method="choose"]

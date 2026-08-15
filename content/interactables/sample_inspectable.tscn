@@ -11,7 +11,8 @@ collision_layer = 2
 collision_mask = 0
 script = ExtResource("1_target")
 prompt = "거울 조사하기 [E]"
-payload = {"text": "낯선 거울이다."}
+action_kind = &"inspect"
+payload = {"node_id": &"line_1", "scene_key": &"foundation.inspect"}
 
 [node name="Sprite2D" type="Sprite2D" parent="."]
 position = Vector2(0, -22)

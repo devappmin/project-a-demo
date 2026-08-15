@@ -15,7 +15,9 @@ func _ready() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed(&"interact", false):
-		execute_target(detector.current_target if detector != null else null)
+		var error := execute_target(detector.current_target if detector != null else null)
+		if error == OK:
+			get_viewport().set_input_as_handled()
 
 func execute_target(target: InteractionTarget) -> Error:
 	if detector == null or target == null or not is_instance_valid(target) or target != detector.current_target:

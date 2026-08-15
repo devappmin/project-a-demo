@@ -123,7 +123,7 @@ func _test_foundation_room_contract() -> void:
 	var mirror := room.get_node_or_null("VisualSort/SampleInspectable") as InteractionTarget
 	assert_not_null(mirror, "foundation room contains the sample inspectable")
 	if mirror != null:
-		assert_eq(mirror.get_interaction().payload, {"text": "낯선 거울이다."}, "sample inspectable exposes the required payload")
+		assert_eq(mirror.get_interaction().payload, {"scene_key":&"foundation.inspect", "node_id":&"line_1"}, "sample inspectable exposes the dialogue payload contract")
 	room.free()
 
 	var app_scene := load("res://app/bootstrap/app_root.tscn") as PackedScene
