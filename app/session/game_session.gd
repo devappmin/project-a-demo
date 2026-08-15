@@ -2,6 +2,7 @@ extends Node
 class_name GameSessionService
 
 const GameMode = preload("res://app/session/game_mode.gd")
+const NarrativeStateResource = preload("res://game/narrative/state/narrative_state.gd")
 
 signal mode_changed(previous: int, current: int)
 signal mode_change_rejected(previous: int, requested: int)
@@ -25,6 +26,7 @@ var _permissions := {
 }
 
 var current_mode: int = GameMode.Value.BOOT
+var narrative_state: NarrativeStateResource = NarrativeStateResource.new()
 var _initialized := false
 
 func _ready() -> void:
