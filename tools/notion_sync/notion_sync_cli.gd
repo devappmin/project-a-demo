@@ -29,6 +29,8 @@ func _run() -> void:
 			printerr(result["message"])
 		quit(1)
 		return
+	if not String(result.get("message", "")).is_empty():
+		print(result["message"])
 	var counts: Dictionary = result.get("counts", {})
 	print("Notion dialogue sync %s: %d scene(s), %d block(s), %d character(s)." % ["dry run" if dry_run else "complete", counts.get("scenes", 0), counts.get("blocks", 0), counts.get("characters", 0)])
 	quit(0)
@@ -74,7 +76,19 @@ static func run_mapped_input(input: Dictionary, output_dir: String = DEFAULT_OUT
 		return {"ok":true, "issues":compiled["issues"], "manifest":compiled["manifest"], "graphs":compiled["graphs"], "error":OK, "message":""}
 	var writer := SnapshotWriter.new()
 	var error: Error = writer.replace_snapshot(output_dir, compiled["graphs"], compiled["manifest"])
-	return {"ok":error == OK, "issues":compiled["issues"], "manifest":compiled["manifest"], "graphs":compiled["graphs"], "error":error, "message":"" if error == OK else "Unable to replace the generated dialogue snapshot (%d)." % error}
+	var recovery: Dictionary = writer.last_recovery.duplicate(true)
+	var message := ""
+	if error != OK:
+		message = "Unable to replace the generated dialogue snapshot (%d)." % error
+	elif String(recovery.get("code", "")) == "backup_cleanup_failed":
+		message = "Snapshot committed; recovery backup remains at %s." % recovery.get("backup_path", "")
+	return {"ok":error == OK, "issues":compiled["issues"], "manifest":compiled["manifest"], "graphs":compiled["graphs"], "error":error, "recovery":recovery, "message":message}
+
+static func is_authorized_for(editor_hint: bool, editor_binary: bool, headless: bool, allow_headless_sync: bool) -> bool:
+	return SyncConfig.is_available_for(editor_hint, editor_binary, headless, allow_headless_sync)
+
+static func exit_code_for(result: Dictionary) -> int:
+	return 0 if bool(result.get("ok", false)) else 1
 
 static func _scene_sorts() -> Array[Dictionary]:
 	return [{"property":"scene_key", "direction":"ascending"}]

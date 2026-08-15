@@ -21,6 +21,7 @@ static func compile(input: Dictionary) -> Dictionary:
 		var character_key := String(character.get("character_key", ""))
 		character_keys.append(StringName(character_key))
 		expression_catalog[character_key] = character.get("expressions", []).duplicate(true) if typeof(character.get("expressions")) == TYPE_ARRAY else []
+	var invalid_character_sources := _invalid_character_sources(characters)
 	var graphs := {}
 	var scene_statuses := {}
 	var filenames := {}
@@ -28,14 +29,21 @@ static func compile(input: Dictionary) -> Dictionary:
 		var scene_key := String(scene.get("scene_key", ""))
 		var scene_status := String(scene.get("status", ""))
 		scene_statuses[scene_key] = scene_status
+		if scene_key.strip_edges().is_empty():
+			issues.append(_issue("error", "invalid_scene_key", scene_key, "", "scene_key must be a nonblank string", scene))
+		if String(scene.get("start_flow", "")).strip_edges().is_empty():
+			issues.append(_issue("error", "invalid_start_flow", scene_key, "", "start_flow must be a nonempty flow name", scene))
 		if graphs.has(scene_key):
 			issues.append(_issue("error", "duplicate_scene_key", scene_key, "", "scene_key must be unique", scene))
 			continue
 		var filename := scene_filename(scene_key)
-		if filenames.has(filename):
+		var filename_identity := filename.to_lower()
+		if not is_safe_scene_key(scene_key):
+			issues.append(_issue("error", "unsafe_scene_filename", scene_key, "", "scene_key cannot produce a safe cross-platform JSON filename", scene))
+		if filenames.has(filename_identity):
 			issues.append(_issue("error", "duplicate_scene_filename", scene_key, "", "scene_key collides with another generated filename", scene))
 		else:
-			filenames[filename] = scene_key
+			filenames[filename_identity] = scene_key
 		var scene_blocks: Array[Dictionary] = []
 		for block: Dictionary in blocks:
 			if String(block.get("scene_key", "")) == scene_key:
@@ -44,8 +52,14 @@ static func compile(input: Dictionary) -> Dictionary:
 		var graph: Dictionary = compiled["graph"]
 		graphs[scene_key] = graph
 		var validator_issues: Array[Dictionary] = Validator.validate(graph, character_keys)
+		var invalid_character_index := 0
 		for validator_issue: Dictionary in validator_issues:
-			var source: Dictionary = compiled["node_sources"].get(String(validator_issue.get("node_id", "")), scene)
+			var source: Dictionary
+			if String(validator_issue.get("code", "")) == "invalid_character_key" and invalid_character_index < invalid_character_sources.size():
+				source = invalid_character_sources[invalid_character_index]
+				invalid_character_index += 1
+			else:
+				source = _validator_issue_source(validator_issue, compiled, scene)
 			var linked_issue := validator_issue.duplicate(true)
 			linked_issue["notion_page_id"] = String(source.get("notion_page_id", ""))
 			linked_issue["source_url"] = String(source.get("source_url", ""))
@@ -65,6 +79,28 @@ static func compile(input: Dictionary) -> Dictionary:
 static func scene_filename(scene_key: String) -> String:
 	return scene_key.replace(".", "_") + ".json"
 
+static func is_safe_scene_key(scene_key: String) -> bool:
+	if scene_key.is_empty() or scene_key != scene_key.strip_edges():
+		return false
+	for forbidden: String in ["/", "\\", ":", "*", "?", "\"", "<", ">", "|"]:
+		if scene_key.contains(forbidden):
+			return false
+	for index: int in scene_key.length():
+		var codepoint := scene_key.unicode_at(index)
+		if codepoint < 32 or codepoint == 127:
+			return false
+	var filename := scene_filename(scene_key)
+	if filename.to_lower() == "manifest.json":
+		return false
+	var basename := filename.get_basename().to_upper()
+	if basename in ["CON", "PRN", "AUX", "NUL"]:
+		return false
+	for prefix: String in ["COM", "LPT"]:
+		for suffix: int in range(1, 10):
+			if basename == prefix + str(suffix):
+				return false
+	return true
+
 static func stable_json(data: Variant) -> String:
 	return JSON.stringify(data, "\t", true, true)
 
@@ -74,6 +110,8 @@ static func _compile_scene(scene: Dictionary, blocks: Array[Dictionary], express
 	var flows: Array[String] = []
 	for block: Dictionary in blocks:
 		var flow := String(block.get("flow", ""))
+		if flow.strip_edges().is_empty():
+			issues.append(_issue("error", "invalid_flow", String(block.get("scene_key", "")), _node_id(block), "block flow must be a nonempty name", block))
 		if not flow_blocks.has(flow):
 			flow_blocks[flow] = []
 			flows.append(flow)
@@ -83,6 +121,7 @@ static func _compile_scene(scene: Dictionary, blocks: Array[Dictionary], express
 	var flow_units := {}
 	var flow_entries := {}
 	var node_sources := {}
+	var choice_sources := {}
 	for flow: String in flows:
 		var units: Array[Dictionary] = []
 		var members: Array = flow_blocks[flow]
@@ -100,6 +139,8 @@ static func _compile_scene(scene: Dictionary, blocks: Array[Dictionary], express
 			var node_id := _node_id(block)
 			units.append({"node_id":node_id, "blocks":unit_blocks})
 			node_sources[node_id] = block
+			if String(block.get("type", "")) == "choice":
+				choice_sources[node_id] = unit_blocks.duplicate()
 		if not units.is_empty():
 			flow_entries[flow] = String(units[0]["node_id"])
 		flow_units[flow] = units
@@ -115,6 +156,7 @@ static func _compile_scene(scene: Dictionary, blocks: Array[Dictionary], express
 				issues.append(_issue("error", "duplicate_node_id", String(scene.get("scene_key", "")), node_id, "compiled node IDs must be unique", block))
 				continue
 			var fallthrough := String(units[unit_index + 1]["node_id"]) if unit_index + 1 < units.size() else ""
+			_validate_targets(unit_blocks, fallthrough, flow_entries, issues)
 			nodes[node_id] = _compile_node(block, unit_blocks, fallthrough, flow_entries)
 			if String(block.get("type", "")) == "line":
 				_validate_expression(block, expression_catalog, issues)
@@ -123,8 +165,20 @@ static func _compile_scene(scene: Dictionary, blocks: Array[Dictionary], express
 	var entry_node := String(flow_entries.get(start_flow, "__missing_flow__" + start_flow))
 	return {
 		"graph":{"schema_version":1, "scene_key":scene_key, "entry_node":entry_node, "nodes":nodes},
-		"node_sources":node_sources
+		"node_sources":node_sources,
+		"choice_sources":choice_sources
 	}
+
+static func _validate_targets(unit_blocks: Array, fallthrough: String, flow_entries: Dictionary, issues: Array[Dictionary]) -> void:
+	for block_value: Variant in unit_blocks:
+		var block: Dictionary = block_value
+		if String(block.get("type", "")) == "end":
+			continue
+		var target_flow := String(block.get("target_flow", "")).strip_edges()
+		if target_flow.is_empty() and fallthrough.is_empty():
+			issues.append(_issue("error", "missing_target_flow", String(block.get("scene_key", "")), _node_id(block), "a terminal non-end block requires target_flow", block))
+		elif not target_flow.is_empty() and not flow_entries.has(target_flow):
+			issues.append(_issue("error", "unknown_target_flow", String(block.get("scene_key", "")), _node_id(block), "target_flow does not name a compiled flow", block))
 
 static func _compile_node(block: Dictionary, unit_blocks: Array, fallthrough: String, flow_entries: Dictionary) -> Dictionary:
 	var block_type := String(block.get("type", ""))
@@ -207,6 +261,35 @@ static func _collect_mapping_errors(items: Array[Dictionary], issues: Array[Dict
 		for message: Variant in errors:
 			issues.append(_issue("error", "mapping_error", String(item.get("scene_key", "")), _node_id(item), String(message), item))
 
+static func _invalid_character_sources(characters: Array[Dictionary]) -> Array[Dictionary]:
+	var invalid: Array[Dictionary] = []
+	var seen := {}
+	for character: Dictionary in characters:
+		var character_key := String(character.get("character_key", ""))
+		if character_key.is_empty() or seen.has(character_key):
+			invalid.append(character)
+		else:
+			seen[character_key] = true
+	return invalid
+
+static func _validator_issue_source(validator_issue: Dictionary, compiled: Dictionary, scene: Dictionary) -> Dictionary:
+	var node_id := String(validator_issue.get("node_id", ""))
+	if String(validator_issue.get("code", "")) in ["invalid_condition", "invalid_effect"]:
+		var item_index := _choice_item_index(String(validator_issue.get("message", "")))
+		var choice_sources: Dictionary = compiled["choice_sources"]
+		if item_index >= 0 and choice_sources.has(node_id):
+			var sources: Array = choice_sources[node_id]
+			if item_index < sources.size():
+				return sources[item_index]
+	var node_sources: Dictionary = compiled["node_sources"]
+	return node_sources.get(node_id, scene)
+
+static func _choice_item_index(message: String) -> int:
+	if not message.begins_with("choice item "):
+		return -1
+	var value := message.trim_prefix("choice item ").get_slice(" ", 0)
+	return value.to_int() if value.is_valid_int() else -1
+
 static func _issue(severity: String, code: String, scene_key: String, node_id: String, message: String, source: Dictionary) -> Dictionary:
 	return {"severity":severity, "code":code, "scene_key":scene_key, "node_id":node_id, "message":message, "notion_page_id":String(source.get("notion_page_id", "")), "source_url":String(source.get("source_url", ""))}
 
@@ -224,7 +307,9 @@ static func _scene_less(left: Dictionary, right: Dictionary) -> bool:
 	return String(left.get("scene_key", "")) < String(right.get("scene_key", ""))
 
 static func _character_less(left: Dictionary, right: Dictionary) -> bool:
-	return String(left.get("character_key", "")) < String(right.get("character_key", ""))
+	var left_key := String(left.get("character_key", ""))
+	var right_key := String(right.get("character_key", ""))
+	return left_key < right_key if left_key != right_key else String(left.get("notion_page_id", "")) < String(right.get("notion_page_id", ""))
 
 static func _block_less(left: Dictionary, right: Dictionary) -> bool:
 	var left_flow := String(left.get("flow", ""))
