@@ -1,0 +1,128 @@
+[gd_scene load_steps=14 format=3]
+
+[ext_resource type="Script" path="res://game/world/map_scene.gd" id="1_map"]
+[ext_resource type="Texture2D" path="res://assets/sprites/tilesets/floor.png" id="2_floor"]
+[ext_resource type="Texture2D" path="res://assets/sprites/tilesets/wall.png" id="3_wall"]
+[ext_resource type="PackedScene" path="res://game/actors/player/player.tscn" id="4_player"]
+[ext_resource type="PackedScene" path="res://content/interactables/sample_inspectable.tscn" id="5_mirror"]
+[ext_resource type="Texture2D" path="res://assets/sprites/item/bed.png" id="6_bed"]
+[ext_resource type="Texture2D" path="res://assets/sprites/item/bookshelf.png" id="7_bookshelf"]
+[ext_resource type="Texture2D" path="res://assets/sprites/item/desk.png" id="8_desk"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape_horizontal"]
+size = Vector2(320, 16)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape_vertical"]
+size = Vector2(16, 192)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape_bed"]
+size = Vector2(30, 18)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape_bookshelf"]
+size = Vector2(27, 12)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape_desk"]
+size = Vector2(43, 14)
+
+[node name="FoundationRoom" type="Node2D"]
+script = ExtResource("1_map")
+map_id = &"foundation_room"
+room_bounds = Rect2(0, 0, 320, 192)
+
+[node name="TileLayer" type="Node2D" parent="."]
+
+[node name="Floor" type="TextureRect" parent="TileLayer"]
+offset_right = 320.0
+offset_bottom = 192.0
+mouse_filter = 2
+texture_repeat = 2
+texture = ExtResource("2_floor")
+stretch_mode = 1
+
+[node name="TopWall" type="TextureRect" parent="TileLayer"]
+offset_right = 320.0
+offset_bottom = 32.0
+mouse_filter = 2
+texture_repeat = 2
+texture = ExtResource("3_wall")
+stretch_mode = 1
+
+[node name="BottomWall" type="TextureRect" parent="TileLayer"]
+offset_top = 176.0
+offset_right = 320.0
+offset_bottom = 192.0
+mouse_filter = 2
+texture_repeat = 2
+texture = ExtResource("3_wall")
+stretch_mode = 1
+
+[node name="EntryPoints" type="Node2D" parent="."]
+
+[node name="start" type="Marker2D" parent="EntryPoints"]
+position = Vector2(160, 112)
+
+[node name="PropLayer" type="Node2D" parent="."]
+
+[node name="Bed" type="Sprite2D" parent="PropLayer"]
+position = Vector2(48, 55)
+texture = ExtResource("6_bed")
+
+[node name="Bookshelf" type="Sprite2D" parent="PropLayer"]
+position = Vector2(272, 51)
+texture = ExtResource("7_bookshelf")
+
+[node name="Desk" type="Sprite2D" parent="PropLayer"]
+position = Vector2(250, 130)
+texture = ExtResource("8_desk")
+
+[node name="SampleInspectable" parent="PropLayer" instance=ExtResource("5_mirror")]
+position = Vector2(160, 54)
+
+[node name="PropCollisions" type="Node2D" parent="PropLayer"]
+
+[node name="Bed" type="StaticBody2D" parent="PropLayer/PropCollisions"]
+position = Vector2(48, 70)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="PropLayer/PropCollisions/Bed"]
+shape = SubResource("RectangleShape_bed")
+
+[node name="Bookshelf" type="StaticBody2D" parent="PropLayer/PropCollisions"]
+position = Vector2(272, 65)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="PropLayer/PropCollisions/Bookshelf"]
+shape = SubResource("RectangleShape_bookshelf")
+
+[node name="Desk" type="StaticBody2D" parent="PropLayer/PropCollisions"]
+position = Vector2(250, 137)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="PropLayer/PropCollisions/Desk"]
+shape = SubResource("RectangleShape_desk")
+
+[node name="Boundaries" type="Node2D" parent="."]
+
+[node name="Top" type="StaticBody2D" parent="Boundaries"]
+position = Vector2(160, 24)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Boundaries/Top"]
+shape = SubResource("RectangleShape_horizontal")
+
+[node name="Bottom" type="StaticBody2D" parent="Boundaries"]
+position = Vector2(160, 184)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Boundaries/Bottom"]
+shape = SubResource("RectangleShape_horizontal")
+
+[node name="Left" type="StaticBody2D" parent="Boundaries"]
+position = Vector2(8, 96)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Boundaries/Left"]
+shape = SubResource("RectangleShape_vertical")
+
+[node name="Right" type="StaticBody2D" parent="Boundaries"]
+position = Vector2(312, 96)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Boundaries/Right"]
+shape = SubResource("RectangleShape_vertical")
+
+[node name="Player" parent="." instance=ExtResource("4_player")]
+position = Vector2(160, 112)

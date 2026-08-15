@@ -1,0 +1,20 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://game/interaction/interaction_target.gd" id="1_target"]
+[ext_resource type="Texture2D" path="res://assets/sprites/item/mirror.png" id="2_mirror"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape_mirror"]
+size = Vector2(24, 40)
+
+[node name="SampleInspectable" type="Area2D"]
+collision_layer = 2
+collision_mask = 0
+script = ExtResource("1_target")
+prompt = "거울 조사하기 [E]"
+payload = {"text": "낯선 거울이다."}
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture = ExtResource("2_mirror")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape_mirror")
