@@ -40,6 +40,8 @@ func run() -> void:
 	_test_zero_visible_choices_fail_safely(service_script)
 	_test_runtime_failure_rolls_back_choice_effects(service_script)
 	_test_downstream_choice_failure_rolls_back_before_publication(service_script)
+	_test_command_callback_reentrancy(service_script)
+	await _test_active_service_exit_restores_mode(service_script)
 	await _test_character_resources_and_view_scene()
 
 func _test_valid_branch(service_script: Variant) -> void:
@@ -319,6 +321,86 @@ func _test_downstream_choice_failure_rolls_back_before_publication(service_scrip
 	service.abort_dialogue(&"test_cleanup")
 	assert_eq(session.current_mode, GameModeResource.Value.MENU, "reentrant dialogue restores its own prior mode")
 	service.free()
+	session.free()
+
+func _test_command_callback_reentrancy(service_script: Variant) -> void:
+	var command_graph := _graph("command_abort", "command", {
+		"command":{"type":"command", "command":{"kind":"abort"}, "next":"old_line"},
+		"old_line":{"type":"line", "speaker":"retti", "expression":"neutral", "text":"must not publish", "next":"end"},
+		"end":{"type":"end"},
+	})
+	var session := _session_in_mode(GameModeResource.Value.CUTSCENE)
+	var loader := GraphLoaderStub.new()
+	loader.graph_to_return = command_graph
+	var service: Variant = service_script.new()
+	service.graph_loader = loader
+	service.game_session = session
+	service.narrative_state = session.narrative_state
+	var failures: Array[Dictionary] = []
+	var lines: Array[String] = []
+	var observation := {"finished_count":0}
+	service.failed.connect(func(context: Dictionary) -> void: failures.append(context.duplicate(true)))
+	service.finished.connect(func() -> void: observation["finished_count"] += 1)
+	service.line_requested.connect(func(_character: StringName, _expression: StringName, text: String) -> void: lines.append(text))
+	service.command_requested.connect(func(_command: Dictionary) -> void: service.abort_dialogue(&"command_abort"))
+	assert_eq(service.start_dialogue(&"command_abort"), OK, "command listener abort stops the old dispatch cleanly")
+	assert_eq(failures.size(), 1, "command listener abort emits exactly one terminal failure")
+	if not failures.is_empty():
+		assert_eq(failures[0].get("reason"), &"command_abort", "command listener abort keeps its terminal reason")
+	assert_eq(observation["finished_count"], 0, "command listener abort never emits finished")
+	assert_eq(lines, [], "old dispatch publishes no line after synchronous abort")
+	assert_eq(service.current_graph, null, "command listener abort leaves no active graph")
+	assert_eq(session.current_mode, GameModeResource.Value.CUTSCENE, "command listener abort restores the prior mode")
+	service.free()
+	session.free()
+
+	session = _session_in_mode(GameModeResource.Value.MENU)
+	loader = GraphLoaderStub.new()
+	loader.graph_to_return = command_graph
+	service = service_script.new()
+	service.graph_loader = loader
+	service.game_session = session
+	service.narrative_state = session.narrative_state
+	failures.clear()
+	lines.clear()
+	observation = {"finished_count":0, "restart_error":FAILED}
+	service.failed.connect(func(context: Dictionary) -> void: failures.append(context.duplicate(true)))
+	service.finished.connect(func() -> void: observation["finished_count"] += 1)
+	service.line_requested.connect(func(_character: StringName, _expression: StringName, text: String) -> void: lines.append(text))
+	service.command_requested.connect(func(_command: Dictionary) -> void:
+		service.abort_dialogue(&"replace_old_run")
+		loader.graph_to_return = _line_graph("replacement")
+		observation["restart_error"] = service.start_dialogue(&"replacement")
+	)
+	assert_eq(service.start_dialogue(&"command_abort"), OK, "old start returns without overwriting a synchronous replacement")
+	assert_eq(observation["restart_error"], OK, "command listener starts a replacement dialogue synchronously")
+	assert_eq(failures.size(), 1, "abort plus replacement emits exactly one old-run terminal failure")
+	assert_eq(observation["finished_count"], 0, "abort plus replacement emits no false finished signal")
+	assert_eq(lines, ["line"], "only the replacement line is published")
+	assert_not_null(service.current_graph, "replacement dialogue remains active")
+	if service.current_graph != null:
+		assert_eq(service.current_graph.scene_key, &"replacement", "old dispatch cannot replace the replacement graph")
+		assert_eq(service.current_node_id, &"line", "old dispatch cannot advance or clear the replacement cursor")
+	assert_eq(session.current_mode, GameModeResource.Value.DIALOGUE, "replacement dialogue retains dialogue mode")
+	service.abort_dialogue(&"test_cleanup")
+	assert_eq(session.current_mode, GameModeResource.Value.MENU, "replacement restores its own prior mode")
+	service.free()
+	session.free()
+
+func _test_active_service_exit_restores_mode(service_script: Variant) -> void:
+	var session := _session_in_mode(GameModeResource.Value.PAUSED)
+	var service: Variant = _service_for_graph(service_script, _line_graph("exit_cleanup"), session)
+	var observation := {"failure_count":0, "finished_count":0}
+	service.failed.connect(func(_context: Dictionary) -> void: observation["failure_count"] += 1)
+	service.finished.connect(func() -> void: observation["finished_count"] += 1)
+	add_child(service)
+	assert_eq(service.start_dialogue(&"exit_cleanup"), OK, "in-tree service starts before lifecycle cleanup")
+	assert_eq(session.current_mode, GameModeResource.Value.DIALOGUE, "active service owns dialogue mode")
+	service.queue_free()
+	await get_tree().process_frame
+	assert_eq(session.current_mode, GameModeResource.Value.PAUSED, "freeing an active service restores its prior mode")
+	assert_eq(observation["failure_count"], 0, "service exit cleanup publishes no misleading failure")
+	assert_eq(observation["finished_count"], 0, "service exit cleanup publishes no misleading finished signal")
 	session.free()
 
 func _test_character_resources_and_view_scene() -> void:

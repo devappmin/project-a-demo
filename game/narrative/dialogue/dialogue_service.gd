@@ -21,6 +21,8 @@ var _active := false
 var _previous_mode := GameModeResource.Value.EXPLORATION
 var _available_choices: Array[Dictionary] = []
 var _deferred_failure_reason: StringName = &""
+var _run_generation := 0
+var _dispatch_state_by_generation: Dictionary = {}
 
 func _ready() -> void:
 	if graph_loader == null:
@@ -29,6 +31,13 @@ func _ready() -> void:
 		game_session = get_node_or_null("/root/GameSession")
 	if narrative_state == null and game_session != null:
 		narrative_state = game_session.narrative_state
+
+func _exit_tree() -> void:
+	if not _active:
+		return
+	_rollback_dispatch_segment(_run_generation)
+	_restore_previous_mode()
+	_clear_active_state()
 
 func start_dialogue(scene_key: StringName, node_id := &"") -> Error:
 	if _active:
@@ -59,6 +68,7 @@ func start_dialogue(scene_key: StringName, node_id := &"") -> Error:
 	if not game_session.change_mode(GameModeResource.Value.DIALOGUE):
 		_emit_failure({"reason":&"mode_rejected", "scene_key":scene_key, "node_id":entry_id})
 		return ERR_UNAVAILABLE
+	_run_generation += 1
 	current_graph = loaded_graph
 	current_node_id = entry_id
 	_available_choices.clear()
@@ -99,7 +109,7 @@ func choose(index: int) -> Error:
 	_available_choices.clear()
 	current_node_id = next_id
 	_deferred_failure_reason = &""
-	var dispatch_error := _dispatch_until_boundary(false)
+	var dispatch_error := _dispatch_until_boundary(false, state_before)
 	if dispatch_error != OK:
 		narrative_state.restore(state_before)
 		var failure_reason := _deferred_failure_reason if not _deferred_failure_reason.is_empty() else &"dispatch_failed"
@@ -119,17 +129,20 @@ func get_checkpoint() -> Dictionary:
 		"next_node_id": String(current_node_id),
 	}.duplicate(true)
 
-func _dispatch_until_boundary(publish_failure := true) -> Error:
-	var state_before: Dictionary = narrative_state.snapshot()
+func _dispatch_until_boundary(publish_failure := true, transaction_state: Dictionary = {}) -> Error:
+	var dispatch_generation := _run_generation
+	var state_before: Dictionary = transaction_state.duplicate(true) if not transaction_state.is_empty() else narrative_state.snapshot()
+	_dispatch_state_by_generation[dispatch_generation] = state_before.duplicate(true)
 	var automatic_steps := 0
-	while _active:
+	while _active and _run_generation == dispatch_generation:
 		var node := current_graph.get_node(current_node_id)
 		if node.is_empty():
-			return _dispatch_failure(ERR_INVALID_DATA, &"missing_node", publish_failure, state_before)
+			return _dispatch_failure(ERR_INVALID_DATA, &"missing_node", publish_failure, state_before, dispatch_generation)
 		var node_type := String(node.get("type", ""))
 		match node_type:
 			"line":
 				_available_choices.clear()
+				_complete_dispatch_segment(dispatch_generation)
 				line_requested.emit(
 					StringName(node.get("speaker", "")),
 					StringName(node.get("expression", "")),
@@ -139,39 +152,46 @@ func _dispatch_until_boundary(publish_failure := true) -> Error:
 			"choice":
 				_available_choices = _filtered_choices(node.get("items", []))
 				if _available_choices.is_empty():
-					return _dispatch_failure(ERR_UNAVAILABLE, &"no_visible_choices", publish_failure, state_before)
+					return _dispatch_failure(ERR_UNAVAILABLE, &"no_visible_choices", publish_failure, state_before, dispatch_generation)
 				var public_items: Array[Dictionary] = []
 				for item: Dictionary in _available_choices:
 					public_items.append({"text":String(item.get("text", ""))})
+				_complete_dispatch_segment(dispatch_generation)
 				choices_requested.emit(public_items.duplicate(true))
 				return OK
 			"end":
+				_complete_dispatch_segment(dispatch_generation)
 				_finish_dialogue()
 				return OK
 			"effect", "command", "jump":
 				if automatic_steps >= MAX_AUTOMATIC_STEPS:
-					return _dispatch_failure(ERR_CYCLIC_LINK, &"dispatch_guard", publish_failure, state_before)
+					return _dispatch_failure(ERR_CYCLIC_LINK, &"dispatch_guard", publish_failure, state_before, dispatch_generation)
 				automatic_steps += 1
 				if node_type == "effect":
 					var effect_error := _apply_effects(node.get("effects", []))
 					if effect_error != OK:
-						return _dispatch_failure(effect_error, &"effect_failed", publish_failure, state_before)
+						return _dispatch_failure(effect_error, &"effect_failed", publish_failure, state_before, dispatch_generation)
 				elif node_type == "command":
 					var command_value: Variant = node.get("command", {})
 					if typeof(command_value) != TYPE_DICTIONARY:
-						return _dispatch_failure(ERR_INVALID_DATA, &"invalid_command", publish_failure, state_before)
+						return _dispatch_failure(ERR_INVALID_DATA, &"invalid_command", publish_failure, state_before, dispatch_generation)
 					var command: Dictionary = command_value
 					command_requested.emit(command.duplicate(true))
+					if not _active or _run_generation != dispatch_generation:
+						_complete_dispatch_segment(dispatch_generation)
+						return OK
 				var next_id := _next_node_id(node)
 				if next_id.is_empty():
-					return _dispatch_failure(ERR_INVALID_DATA, &"invalid_next", publish_failure, state_before)
+					return _dispatch_failure(ERR_INVALID_DATA, &"invalid_next", publish_failure, state_before, dispatch_generation)
 				current_node_id = next_id
 			_:
-				return _dispatch_failure(ERR_INVALID_DATA, &"unsupported_node", publish_failure, state_before)
+				return _dispatch_failure(ERR_INVALID_DATA, &"unsupported_node", publish_failure, state_before, dispatch_generation)
+	_complete_dispatch_segment(dispatch_generation)
 	return OK
 
-func _dispatch_failure(error: Error, reason: StringName, publish_failure: bool, state_before: Dictionary) -> Error:
+func _dispatch_failure(error: Error, reason: StringName, publish_failure: bool, state_before: Dictionary, dispatch_generation: int) -> Error:
 	narrative_state.restore(state_before)
+	_complete_dispatch_segment(dispatch_generation)
 	if publish_failure:
 		return _runtime_failure(error, reason)
 	_deferred_failure_reason = reason
@@ -223,6 +243,7 @@ func _finish_dialogue() -> void:
 	finished.emit()
 
 func _runtime_failure(error: Error, reason: StringName) -> Error:
+	_rollback_dispatch_segment(_run_generation)
 	var context := {
 		"reason": reason,
 		"scene_key": current_graph.scene_key if current_graph != null else &"",
@@ -239,11 +260,22 @@ func _restore_previous_mode() -> void:
 		game_session.change_mode(_previous_mode)
 
 func _clear_active_state() -> void:
+	_dispatch_state_by_generation.erase(_run_generation)
 	_active = false
 	current_graph = null
 	current_node_id = &""
 	_available_choices.clear()
 	_deferred_failure_reason = &""
+	_run_generation += 1
+
+func _complete_dispatch_segment(generation: int) -> void:
+	_dispatch_state_by_generation.erase(generation)
+
+func _rollback_dispatch_segment(generation: int) -> void:
+	var state_value: Variant = _dispatch_state_by_generation.get(generation)
+	if narrative_state != null and typeof(state_value) == TYPE_DICTIONARY:
+		narrative_state.restore(state_value)
+	_dispatch_state_by_generation.erase(generation)
 
 func _emit_failure(context: Dictionary) -> void:
 	failed.emit(context.duplicate(true))
