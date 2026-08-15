@@ -44,11 +44,13 @@ func replace_snapshot(output_dir: String, graphs: Dictionary, manifest: Dictiona
 		_remove_tree(paths["temporary"])
 		return verify_error
 	var had_previous := DirAccess.dir_exists_absolute(paths["output"])
+	var verified_recovery_fingerprint: Dictionary = {}
 	if had_previous:
 		var recovery_copy_error := _copy_tree_verified(paths["output"], paths["recovery"])
 		if recovery_copy_error != OK:
 			_remove_tree(paths["temporary"])
 			return recovery_copy_error
+		verified_recovery_fingerprint = _tree_fingerprint(paths["recovery"])
 	_observe("before_backup_rename", paths)
 	if had_previous:
 		var backup_error := DirAccess.rename_absolute(paths["output"], paths["backup"])
@@ -60,13 +62,13 @@ func replace_snapshot(output_dir: String, graphs: Dictionary, manifest: Dictiona
 	if publish_error != OK:
 		if had_previous:
 			var rollback_error := _rollback_by_rename(paths)
-			var temporary_cleanup_error := OK
 			if rollback_error != OK:
-				if _path_exists(paths["backup"]):
-					temporary_cleanup_error = _remove_tree(paths["temporary"])
-				last_recovery = {"code":"rollback_failed", "backup_path":paths["backup"], "temporary_path":paths["temporary"], "rollback_error":rollback_error, "publish_error":publish_error, "recoverable":_path_exists(paths["backup"])}
+				var recovery_path := _verified_recovery_path(paths["recovery"], verified_recovery_fingerprint)
+				if recovery_path.is_empty():
+					_remove_tree(paths["temporary"])
+				last_recovery = {"code":"rollback_failed", "backup_path":paths["backup"], "backup_recoverable":false, "temporary_path":paths["temporary"], "recovery_path":recovery_path, "rollback_error":rollback_error, "publish_error":publish_error, "recoverable":not recovery_path.is_empty()}
 				return ERR_ROLLBACK_FAILED
-			temporary_cleanup_error = _remove_tree(paths["temporary"])
+			var temporary_cleanup_error := _remove_tree(paths["temporary"])
 			if temporary_cleanup_error != OK:
 				return temporary_cleanup_error
 		else:
@@ -154,6 +156,7 @@ func _rollback_by_rename(paths: Dictionary) -> Error:
 	var restore_error := DirAccess.rename_absolute(backup, output)
 	if restore_error != OK:
 		return restore_error
+	_observe("before_retain_backup_rename", paths)
 	var retain_backup_error := DirAccess.rename_absolute(recovery, backup)
 	if retain_backup_error != OK:
 		return retain_backup_error
@@ -164,6 +167,11 @@ func _copy_tree_verified(source: String, destination: String) -> Error:
 	if copy_error != OK:
 		return copy_error
 	return OK if _tree_fingerprint(source) == _tree_fingerprint(destination) else ERR_FILE_CORRUPT
+
+func _verified_recovery_path(path: String, expected_fingerprint: Dictionary) -> String:
+	if not DirAccess.dir_exists_absolute(path):
+		return ""
+	return path if _tree_fingerprint(path) == expected_fingerprint else ""
 
 func _copy_tree(source: String, destination: String) -> Error:
 	var create_error := DirAccess.make_dir_recursive_absolute(destination)

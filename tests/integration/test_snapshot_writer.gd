@@ -19,6 +19,7 @@ func run() -> void:
 	_test_actual_backup_rename_failure(writer_script)
 	_test_actual_publish_failure_rolls_back_by_rename(writer_script)
 	_test_actual_rollback_failure_preserves_backup(writer_script)
+	_test_final_backup_retention_failure_preserves_verified_recovery(writer_script)
 	_test_actual_backup_cleanup_failure_is_committed(writer_script)
 	_test_unsafe_scene_names_fail_closed(writer_script)
 	_cleanup_exact_test_root()
@@ -91,7 +92,30 @@ func _test_actual_rollback_failure_preserves_backup(writer_script: Variant) -> v
 	assert_eq(result, ERR_CANT_RESOLVE, "rollback primitive failure returns the distinct recovery error")
 	assert_eq(_snapshot_bytes(state["output"]), {"obstruction.txt":"external obstruction".to_utf8_buffer()}, "rollback failure does not delete the current-path obstruction")
 	assert_eq(_snapshot_bytes(state["backup"]), state["before"], "rollback failure preserves the intact old backup byte-for-byte")
-	assert_eq(_snapshot_bytes(state["temporary"]), {}, "rollback failure still cleans the exact temporary sibling")
+	assert_eq(_snapshot_bytes(String(state["temporary"]).path_join("recovery")), state["before"], "rollback failure preserves the verified recovery copy")
+	var recovery: Dictionary = writer.last_recovery
+	assert_eq(recovery.get("recovery_path", ""), ProjectSettings.globalize_path(String(state["temporary"]).path_join("recovery")), "rollback failure identifies the verified recovery path")
+	assert_true(bool(recovery.get("recoverable", false)), "verified recovery bytes make rollback failure actionable")
+
+func _test_final_backup_retention_failure_preserves_verified_recovery(writer_script: Variant) -> void:
+	var state := _setup_previous("retain-backup-failure")
+	_scenario = "retain_backup_obstruction"
+	_observer_error = OK
+	var writer: Variant = writer_script.new(Callable(self, "_transaction_observer"))
+	var payload := _payload()
+	var result: Error = writer.replace_snapshot(state["output"], payload["graphs"], payload["manifest"])
+	_scenario = ""
+	assert_eq(_observer_error, OK, "actual unrelated backup obstruction is created after current restoration")
+	assert_eq(result, ERR_CANT_RESOLVE, "final recovery-to-backup rename failure returns the distinct rollback error")
+	assert_eq(_snapshot_bytes(state["output"]), state["before"], "final rollback step failure leaves exact old current bytes restored")
+	assert_eq(_snapshot_bytes(state["backup"]), {"obstruction.txt":"unrelated backup obstruction".to_utf8_buffer()}, "unrelated backup obstruction remains untouched")
+	var recovery_path := String(state["temporary"]).path_join("recovery")
+	assert_eq(_snapshot_bytes(recovery_path), state["before"], "final rollback step failure preserves exact verified recovery bytes")
+	var recovery: Dictionary = writer.last_recovery
+	assert_eq(recovery.get("recovery_path", ""), ProjectSettings.globalize_path(recovery_path), "failure state points to the verified recovery copy, not unrelated backup")
+	assert_true(bool(recovery.get("recoverable", false)), "verified recovery path is actionable")
+	assert_false(bool(recovery.get("backup_recoverable", true)), "unrelated backup obstruction is explicitly non-recoverable")
+	assert_true(recovery.get("recovery_path", "") != recovery.get("backup_path", ""), "unrelated backup obstruction is never labeled as the recoverable artifact")
 
 func _test_actual_backup_cleanup_failure_is_committed(writer_script: Variant) -> void:
 	var state := _setup_previous("cleanup-failure")
@@ -156,6 +180,12 @@ func _transaction_observer(stage: String, paths_value: Variant) -> void:
 			if stage == "before_publish_rename":
 				_observer_error = DirAccess.make_dir_recursive_absolute(String(paths["output"]))
 				_write_raw(String(paths["output"]).path_join("obstruction.txt"), "external obstruction".to_utf8_buffer())
+		"retain_backup_obstruction":
+			if stage == "before_publish_rename":
+				_observer_error = DirAccess.rename_absolute(publish_path, String(paths["output"]))
+			elif stage == "before_retain_backup_rename":
+				_observer_error = DirAccess.make_dir_recursive_absolute(String(paths["backup"]))
+				_write_raw(String(paths["backup"]).path_join("obstruction.txt"), "unrelated backup obstruction".to_utf8_buffer())
 		"cleanup_mid_order":
 			if stage == "before_backup_cleanup":
 				_observer_error = FileAccess.set_read_only_attribute(String(paths["backup"]).path_join("m-old.json"), true)
