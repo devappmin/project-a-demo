@@ -35,6 +35,7 @@ func run() -> void:
 	_test_load_and_entry_failures_preserve_mode(service_script)
 	_test_end_and_abort_restore_exact_mode(service_script)
 	_test_automatic_dispatch_and_guard(service_script)
+	_test_start_and_advance_automatic_transactions(service_script)
 	_test_choice_filtering_index_stability_and_checkpoint(service_script)
 	_test_zero_visible_choices_fail_safely(service_script)
 	_test_runtime_failure_rolls_back_choice_effects(service_script)
@@ -124,6 +125,40 @@ func _test_automatic_dispatch_and_guard(service_script: Variant) -> void:
 	assert_eq(graph.get_node(&"command")["command"]["payload"]["shake"], 1, "command signal mutation cannot alter graph data")
 	service.advance()
 	assert_eq(session.current_mode, GameModeResource.Value.CUTSCENE, "automatic chain end restores cutscene")
+	service.free()
+	session.free()
+
+func _test_start_and_advance_automatic_transactions(service_script: Variant) -> void:
+	_reset_captures()
+	var broken_nodes := {
+		"effect_a":{"type":"effect", "effects":[{"kind":"flag_set", "key":"automatic_a", "value":true}], "next":"effect_b"},
+		"effect_b":{"type":"effect", "effects":[{"kind":"flag_set", "key":"automatic_b", "value":true}], "next":"broken"},
+		"broken":{"type":"jump", "next":"missing"},
+	}
+	var session := _session_in_mode(GameModeResource.Value.PAUSED)
+	session.narrative_state.set_flag(&"preserved", true)
+	var before: Dictionary = session.narrative_state.snapshot()
+	var service: Variant = _service_for_graph(service_script, _graph("start_transaction", "effect_a", broken_nodes), session)
+	assert_eq(service.start_dialogue(&"start_transaction"), ERR_INVALID_DATA, "late automatic failure is returned from start")
+	assert_eq(session.narrative_state.snapshot(), before, "start rolls back the entire automatic segment")
+	assert_eq(_failures.size(), 1, "failed start publishes one terminal failure")
+	if not _failures.is_empty():
+		assert_eq(_failures[0].get("reason"), &"invalid_next", "failed start reports the late invalid edge")
+	service.free()
+	session.free()
+
+	_reset_captures()
+	session = _session_in_mode(GameModeResource.Value.MENU)
+	session.narrative_state.set_flag(&"preserved", true)
+	before = session.narrative_state.snapshot()
+	var advance_nodes := broken_nodes.duplicate(true)
+	advance_nodes["line"] = {"type":"line", "speaker":"retti", "expression":"neutral", "text":"before effects", "next":"effect_a"}
+	service = _service_for_graph(service_script, _graph("advance_transaction", "line", advance_nodes), session)
+	assert_eq(service.start_dialogue(&"advance_transaction"), OK, "advance transaction graph reaches its line")
+	service.advance()
+	assert_eq(session.narrative_state.snapshot(), before, "advance rolls back the entire automatic segment")
+	assert_eq(session.current_mode, GameModeResource.Value.MENU, "failed advance restores the prior mode")
+	assert_eq(_failures.size(), 1, "failed advance publishes one terminal failure")
 	service.free()
 	session.free()
 

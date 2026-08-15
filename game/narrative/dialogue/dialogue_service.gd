@@ -2,7 +2,8 @@ extends Node
 class_name DialogueService
 
 const GameModeResource = preload("res://app/session/game_mode.gd")
-const MAX_AUTOMATIC_STEPS := 256
+const DialogueRuntimeContractResource = preload("res://game/narrative/dialogue/dialogue_runtime_contract.gd")
+const MAX_AUTOMATIC_STEPS := DialogueRuntimeContractResource.MAX_AUTOMATIC_STEPS
 
 signal line_requested(character_key: StringName, expression: StringName, text: String)
 signal choices_requested(items: Array[Dictionary])
@@ -119,11 +120,12 @@ func get_checkpoint() -> Dictionary:
 	}.duplicate(true)
 
 func _dispatch_until_boundary(publish_failure := true) -> Error:
+	var state_before: Dictionary = narrative_state.snapshot()
 	var automatic_steps := 0
 	while _active:
 		var node := current_graph.get_node(current_node_id)
 		if node.is_empty():
-			return _dispatch_failure(ERR_INVALID_DATA, &"missing_node", publish_failure)
+			return _dispatch_failure(ERR_INVALID_DATA, &"missing_node", publish_failure, state_before)
 		var node_type := String(node.get("type", ""))
 		match node_type:
 			"line":
@@ -137,7 +139,7 @@ func _dispatch_until_boundary(publish_failure := true) -> Error:
 			"choice":
 				_available_choices = _filtered_choices(node.get("items", []))
 				if _available_choices.is_empty():
-					return _dispatch_failure(ERR_UNAVAILABLE, &"no_visible_choices", publish_failure)
+					return _dispatch_failure(ERR_UNAVAILABLE, &"no_visible_choices", publish_failure, state_before)
 				var public_items: Array[Dictionary] = []
 				for item: Dictionary in _available_choices:
 					public_items.append({"text":String(item.get("text", ""))})
@@ -148,29 +150,28 @@ func _dispatch_until_boundary(publish_failure := true) -> Error:
 				return OK
 			"effect", "command", "jump":
 				if automatic_steps >= MAX_AUTOMATIC_STEPS:
-					return _dispatch_failure(ERR_CYCLIC_LINK, &"dispatch_guard", publish_failure)
+					return _dispatch_failure(ERR_CYCLIC_LINK, &"dispatch_guard", publish_failure, state_before)
 				automatic_steps += 1
 				if node_type == "effect":
-					var state_before := narrative_state.snapshot()
 					var effect_error := _apply_effects(node.get("effects", []))
 					if effect_error != OK:
-						narrative_state.restore(state_before)
-						return _dispatch_failure(effect_error, &"effect_failed", publish_failure)
+						return _dispatch_failure(effect_error, &"effect_failed", publish_failure, state_before)
 				elif node_type == "command":
 					var command_value: Variant = node.get("command", {})
 					if typeof(command_value) != TYPE_DICTIONARY:
-						return _dispatch_failure(ERR_INVALID_DATA, &"invalid_command", publish_failure)
+						return _dispatch_failure(ERR_INVALID_DATA, &"invalid_command", publish_failure, state_before)
 					var command: Dictionary = command_value
 					command_requested.emit(command.duplicate(true))
 				var next_id := _next_node_id(node)
 				if next_id.is_empty():
-					return _dispatch_failure(ERR_INVALID_DATA, &"invalid_next", publish_failure)
+					return _dispatch_failure(ERR_INVALID_DATA, &"invalid_next", publish_failure, state_before)
 				current_node_id = next_id
 			_:
-				return _dispatch_failure(ERR_INVALID_DATA, &"unsupported_node", publish_failure)
+				return _dispatch_failure(ERR_INVALID_DATA, &"unsupported_node", publish_failure, state_before)
 	return OK
 
-func _dispatch_failure(error: Error, reason: StringName, publish_failure: bool) -> Error:
+func _dispatch_failure(error: Error, reason: StringName, publish_failure: bool, state_before: Dictionary) -> Error:
+	narrative_state.restore(state_before)
 	if publish_failure:
 		return _runtime_failure(error, reason)
 	_deferred_failure_reason = reason

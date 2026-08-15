@@ -1,6 +1,7 @@
 extends RefCounted
 class_name DialogueGraphValidator
 
+const DialogueRuntimeContractResource = preload("res://game/narrative/dialogue/dialogue_runtime_contract.gd")
 const SUPPORTED_NODE_TYPES := ["line", "choice", "effect", "command", "jump", "end"]
 const CONDITION_KINDS := ["flag", "stat", "inventory", "quest", "collectible"]
 const EFFECT_KINDS := ["flag_set", "stat_set", "stat_add", "inventory_add", "inventory_remove", "quest_set", "collectible_add"]
@@ -23,7 +24,8 @@ static func validate(data: Dictionary, character_keys: Array[StringName]) -> Arr
 	var adjacency := _empty_adjacency(node_ids)
 	for node_id: String in node_ids:
 		_validate_node(node_id, nodes[node_id], nodes, characters, scene_key, adjacency, issues)
-	_validate_reachable_cycle_exits(data, nodes, adjacency, scene_key, issues)
+	_validate_cycle_exits(adjacency, scene_key, issues)
+	_validate_automatic_path_lengths(nodes, node_ids, scene_key, issues)
 	return issues
 
 static func _scene_key(data: Dictionary) -> String:
@@ -221,29 +223,25 @@ static func _effect_is_valid(value: Variant) -> bool:
 			return typeof(effect_value) == TYPE_STRING
 	return false
 
-static func _validate_reachable_cycle_exits(data: Dictionary, nodes: Dictionary, adjacency: Dictionary, scene_key: String, issues: Array[Dictionary]) -> void:
-	var entry_value: Variant = data.get("entry_node")
-	if not _is_nonempty_string(entry_value) or not nodes.has(String(entry_value)):
-		return
-	var reachable := _reachable_from(String(entry_value), adjacency, {})
+static func _validate_cycle_exits(adjacency: Dictionary, scene_key: String, issues: Array[Dictionary]) -> void:
 	var reverse := {}
-	var reachable_ids: Array[String] = []
-	for node_id: String in reachable:
-		reachable_ids.append(node_id)
+	var node_ids: Array[String] = []
+	for node_id: String in adjacency:
+		node_ids.append(node_id)
 		reverse[node_id] = []
-	reachable_ids.sort()
-	for from_id: String in reachable_ids:
+	node_ids.sort()
+	for from_id: String in node_ids:
 		for target: String in adjacency.get(from_id, []):
 			if reverse.has(target):
 				reverse[target].append(from_id)
 	var assigned := {}
-	for seed: String in reachable_ids:
+	for seed: String in node_ids:
 		if assigned.has(seed):
 			continue
-		var forward := _reachable_from(seed, adjacency, reachable)
-		var backward := _reachable_from(seed, reverse, reachable)
+		var forward := _reachable_from(seed, adjacency, {})
+		var backward := _reachable_from(seed, reverse, {})
 		var component: Array[String] = []
-		for candidate: String in reachable_ids:
+		for candidate: String in node_ids:
 			if forward.has(candidate) and backward.has(candidate):
 				component.append(candidate)
 				assigned[candidate] = true
@@ -263,7 +261,30 @@ static func _validate_reachable_cycle_exits(data: Dictionary, nodes: Dictionary,
 			if has_exit:
 				break
 		if not has_exit:
-			_add_issue(issues, "cycle_without_exit", scene_key, component[0], "reachable cycle has no edge to a node outside the cycle")
+			_add_issue(issues, "cycle_without_exit", scene_key, component[0], "cycle has no edge to a node outside the cycle")
+
+static func _validate_automatic_path_lengths(nodes: Dictionary, node_ids: Array[String], scene_key: String, issues: Array[Dictionary]) -> void:
+	for start_id: String in node_ids:
+		var current_id := start_id
+		var visited := {}
+		var automatic_steps := 0
+		while nodes.has(current_id) and not visited.has(current_id):
+			var node_value: Variant = nodes[current_id]
+			if typeof(node_value) != TYPE_DICTIONARY:
+				break
+			var node: Dictionary = node_value
+			var node_type := String(node.get("type", ""))
+			if node_type not in ["effect", "command", "jump"]:
+				break
+			visited[current_id] = true
+			automatic_steps += 1
+			if automatic_steps > DialogueRuntimeContractResource.MAX_AUTOMATIC_STEPS:
+				_add_issue(issues, "automatic_path_too_long", scene_key, start_id, "automatic path exceeds %d nodes before a stable boundary" % DialogueRuntimeContractResource.MAX_AUTOMATIC_STEPS)
+				break
+			var next_value: Variant = node.get("next", "")
+			if not _is_nonempty_string(next_value) or not nodes.has(String(next_value)):
+				break
+			current_id = String(next_value)
 
 static func _reachable_from(start: String, adjacency: Dictionary, allowed: Dictionary) -> Dictionary:
 	var visited := {}

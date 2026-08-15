@@ -19,8 +19,10 @@ func run() -> void:
 	_validate_schema_and_node_contract(validator)
 	_validate_rule_shapes(validator)
 	_validate_reachable_cycles(validator)
+	_validate_automatic_path_limit(validator)
 	_validate_graph_immutability(graph_script)
 	_validate_loader(loader_script)
+	_validate_loader_control_flow_contract(loader_script)
 
 func _validate_fixture_contract(validator: Variant) -> void:
 	var valid: Variant = JSON.parse_string(FileAccess.get_file_as_string("res://tests/fixtures/dialogues/valid_branch.json"))
@@ -122,7 +124,13 @@ func _validate_reachable_cycles(validator: Variant) -> void:
 	assert_false(_has_code(_validate(validator, escapable, [&"retti"]), "cycle_without_exit"), "a reachable cycle with an explicit exit is valid")
 	var unreachable := _minimal_graph()
 	unreachable["nodes"]["orphan"] = {"type":"jump", "next":"orphan"}
-	assert_false(_has_code(_validate(validator, unreachable, [&"retti"]), "cycle_without_exit"), "unreachable cycles do not block the graph")
+	assert_true(_has_code_at(_validate(validator, unreachable, [&"retti"]), "cycle_without_exit", "orphan"), "orphan cycles are rejected because public entry overrides can reach them")
+
+func _validate_automatic_path_limit(validator: Variant) -> void:
+	var allowed := _automatic_graph("automatic.allowed", 256)
+	assert_false(_has_code(_validate(validator, allowed, [&"retti"]), "automatic_path_too_long"), "256 automatic nodes may reach a stable boundary")
+	var rejected := _automatic_graph("automatic.rejected", 257)
+	assert_true(_has_code_at(_validate(validator, rejected, [&"retti"]), "automatic_path_too_long", "jump_0"), "257 automatic nodes are rejected from their possible entry override")
 
 func _validate_graph_immutability(graph_script: Variant) -> void:
 	var source: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://tests/fixtures/dialogues/valid_branch.json"))
@@ -165,6 +173,45 @@ func _validate_loader(loader_script: Variant) -> void:
 	assert_eq(loader.load_scene(StringName("..\\valid.branch")), null, "loader rejects Windows path separators in scene keys")
 	assert_eq(loader.last_failure["code"], "unsafe_scene_key", "loader reports unsafe Windows scene keys")
 
+func _validate_loader_control_flow_contract(loader_script: Variant) -> void:
+	var output_directory := "user://test-output/dialogue-validator-%s" % Time.get_ticks_usec()
+	var absolute_directory := ProjectSettings.globalize_path(output_directory)
+	assert_eq(DirAccess.make_dir_recursive_absolute(absolute_directory), OK, "loader control-flow fixture directory is created")
+	var fixtures: Array[Dictionary] = [
+		_automatic_graph("loader.allowed", 256),
+		_automatic_graph("loader.rejected", 257),
+		{
+			"schema_version":1,
+			"scene_key":"loader.orphan",
+			"entry_node":"end",
+			"nodes":{"end":{"type":"end"}, "orphan":{"type":"jump", "next":"orphan"}}
+		},
+	]
+	for fixture: Dictionary in fixtures:
+		var scene_key := String(fixture["scene_key"])
+		var path := output_directory.path_join(scene_key.replace(".", "_") + ".json")
+		var file := FileAccess.open(path, FileAccess.WRITE)
+		assert_not_null(file, "loader control-flow fixture opens for %s" % scene_key)
+		if file == null:
+			continue
+		file.store_string(JSON.stringify(fixture))
+		file.close()
+	var loader: Variant = loader_script.new()
+	loader.base_directory = output_directory
+	var loader_characters: Array[StringName] = [&"retti"]
+	loader.character_keys = loader_characters
+	var allowed: Variant = loader.load_scene(&"loader.allowed")
+	assert_not_null(allowed, "loader accepts the exact 256 automatic-node boundary")
+	assert_eq(loader.load_scene(&"loader.rejected"), null, "loader rejects a 257 automatic-node segment")
+	assert_eq(loader.last_failure.get("code", ""), "validation_failed", "long automatic path fails at validation")
+	assert_true(_has_code(loader.last_issues, "automatic_path_too_long"), "loader exposes the automatic path issue")
+	assert_eq(loader.load_scene(&"loader.orphan"), null, "loader rejects an orphan override cycle")
+	assert_true(_has_code(loader.last_issues, "cycle_without_exit"), "loader exposes the orphan cycle issue")
+	for fixture: Dictionary in fixtures:
+		var scene_key := String(fixture["scene_key"])
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(output_directory.path_join(scene_key.replace(".", "_") + ".json")))
+	DirAccess.remove_absolute(absolute_directory)
+
 func _minimal_graph() -> Dictionary:
 	return {
 		"schema_version": 1,
@@ -172,6 +219,14 @@ func _minimal_graph() -> Dictionary:
 		"entry_node": "end",
 		"nodes": {"end": {"type":"end"}}
 	}
+
+func _automatic_graph(scene_key: String, automatic_count: int) -> Dictionary:
+	var nodes := {}
+	for index: int in automatic_count:
+		nodes["jump_%d" % index] = {"type":"jump", "next":"line" if index == automatic_count - 1 else "jump_%d" % (index + 1)}
+	nodes["line"] = {"type":"line", "speaker":"retti", "expression":"neutral", "text":"boundary", "next":"end"}
+	nodes["end"] = {"type":"end"}
+	return {"schema_version":1, "scene_key":scene_key, "entry_node":"jump_0", "nodes":nodes}
 
 func _validate(validator: Variant, data: Dictionary, characters: Array[StringName]) -> Array:
 	return validator.validate(data, characters)
