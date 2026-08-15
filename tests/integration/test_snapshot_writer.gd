@@ -78,7 +78,7 @@ func _test_actual_publish_failure_rolls_back_by_rename(writer_script: Variant) -
 	_scenario = ""
 	assert_true(result != OK, "actual missing-temp publish primitive failure is returned after rollback")
 	assert_eq(_snapshot_bytes(state["output"]), state["before"], "rename rollback restores exact old current bytes")
-	assert_eq(_snapshot_bytes(state["backup"]), {}, "successful rename rollback consumes the backup")
+	assert_eq(_snapshot_bytes(state["backup"]), state["before"], "successful rollback retains an exact backup as the literal error contract requires")
 	assert_eq(_snapshot_bytes(state["temporary"]), {}, "successful rename rollback removes the failed new snapshot")
 
 func _test_actual_rollback_failure_preserves_backup(writer_script: Variant) -> void:
@@ -95,7 +95,11 @@ func _test_actual_rollback_failure_preserves_backup(writer_script: Variant) -> v
 
 func _test_actual_backup_cleanup_failure_is_committed(writer_script: Variant) -> void:
 	var state := _setup_previous("cleanup-failure")
-	_scenario = "cleanup_read_only"
+	_write_raw(String(state["output"]).path_join("a-old.json"), "deleted first".to_utf8_buffer())
+	_write_raw(String(state["output"]).path_join("m-old.json"), "read only middle".to_utf8_buffer())
+	_write_raw(String(state["output"]).path_join("z-old.json"), "retained last".to_utf8_buffer())
+	state["before"] = _snapshot_bytes(state["output"])
+	_scenario = "cleanup_mid_order"
 	_observer_error = OK
 	var writer: Variant = writer_script.new(Callable(self, "_transaction_observer"))
 	var payload := _payload()
@@ -104,11 +108,16 @@ func _test_actual_backup_cleanup_failure_is_committed(writer_script: Variant) ->
 	assert_eq(_observer_error, OK, "cleanup failure fixture makes the actual backup file read-only")
 	assert_eq(result, OK, "a valid committed output is not reported as an import failure when backup cleanup fails")
 	assert_eq(_snapshot_bytes(state["output"]), _payload_bytes(payload), "cleanup failure leaves the committed output current")
-	assert_eq(_snapshot_bytes(state["backup"]), state["before"], "cleanup failure retains the exact recovery backup")
+	var residue := _snapshot_bytes(state["backup"])
+	assert_false(residue.has("a-old.json"), "mid-order cleanup proves an earlier backup file was actually deleted")
+	assert_true(residue.has("m-old.json") and residue.has("old.json") and residue.has("z-old.json"), "mid-order cleanup leaves a deterministic partial residue")
 	var recovery: Variant = writer.get("last_recovery")
-	assert_true(typeof(recovery) == TYPE_DICTIONARY and recovery.get("code", "") == "backup_cleanup_failed", "cleanup failure exposes actionable recovery state")
+	assert_true(typeof(recovery) == TYPE_DICTIONARY and recovery.get("code", "") == "backup_cleanup_residue", "cleanup failure names the artifact as residue, not a recovery backup")
+	assert_false(bool(recovery.get("recoverable", true)), "partial cleanup residue is never advertised as recoverable")
 	var retry_writer: Variant = writer_script.new()
 	assert_eq(retry_writer.replace_snapshot(state["output"], payload["graphs"], payload["manifest"]), ERR_ALREADY_EXISTS, "retained backup makes future replacement deterministic")
+	assert_eq(retry_writer.last_recovery.get("code", ""), "backup_artifact_present", "future replacement truthfully reports a generic blocking artifact")
+	assert_false(bool(retry_writer.last_recovery.get("recoverable", true)), "future process does not guess that a stale artifact is recoverable")
 	_set_tree_read_only(state["backup"], false)
 
 func _test_unsafe_scene_names_fail_closed(writer_script: Variant) -> void:
@@ -128,27 +137,28 @@ func _transaction_observer(stage: String, paths_value: Variant) -> void:
 	if typeof(paths_value) != TYPE_DICTIONARY:
 		return
 	var paths: Dictionary = paths_value
+	var publish_path := String(paths.get("publish", paths["temporary"]))
 	match _scenario:
 		"partial_write":
 			if stage == "before_write":
-				_observer_error = DirAccess.make_dir_recursive_absolute(String(paths["temporary"]).path_join("manifest.json"))
+				_observer_error = DirAccess.make_dir_recursive_absolute(publish_path.path_join("manifest.json"))
 		"corrupt_reread":
 			if stage == "after_write":
-				_write_raw(String(paths["temporary"]).path_join("foundation_inspect.json"), "corrupt".to_utf8_buffer())
+				_write_raw(publish_path.path_join("foundation_inspect.json"), "corrupt".to_utf8_buffer())
 		"backup_rename":
 			if stage == "before_backup_rename":
 				_observer_error = DirAccess.make_dir_recursive_absolute(String(paths["backup"]))
 				_write_raw(String(paths["backup"]).path_join("obstruction.txt"), "backup obstruction".to_utf8_buffer())
 		"publish_then_fail":
 			if stage == "before_publish_rename":
-				_observer_error = DirAccess.rename_absolute(String(paths["temporary"]), String(paths["output"]))
+				_observer_error = DirAccess.rename_absolute(publish_path, String(paths["output"]))
 		"rollback_obstruction":
 			if stage == "before_publish_rename":
 				_observer_error = DirAccess.make_dir_recursive_absolute(String(paths["output"]))
 				_write_raw(String(paths["output"]).path_join("obstruction.txt"), "external obstruction".to_utf8_buffer())
-		"cleanup_read_only":
+		"cleanup_mid_order":
 			if stage == "before_backup_cleanup":
-				_observer_error = FileAccess.set_read_only_attribute(String(paths["backup"]).path_join("nested/bytes.bin"), true)
+				_observer_error = FileAccess.set_read_only_attribute(String(paths["backup"]).path_join("m-old.json"), true)
 
 func _setup_previous(label: String) -> Dictionary:
 	_cleanup_exact_test_root()

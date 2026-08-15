@@ -274,13 +274,12 @@ static func _invalid_character_sources(characters: Array[Dictionary]) -> Array[D
 
 static func _validator_issue_source(validator_issue: Dictionary, compiled: Dictionary, scene: Dictionary) -> Dictionary:
 	var node_id := String(validator_issue.get("node_id", ""))
-	if String(validator_issue.get("code", "")) in ["invalid_condition", "invalid_effect"]:
-		var item_index := _choice_item_index(String(validator_issue.get("message", "")))
-		var choice_sources: Dictionary = compiled["choice_sources"]
-		if item_index >= 0 and choice_sources.has(node_id):
-			var sources: Array = choice_sources[node_id]
-			if item_index < sources.size():
-				return sources[item_index]
+	var item_index := _choice_item_index(String(validator_issue.get("message", "")))
+	var choice_sources: Dictionary = compiled["choice_sources"]
+	if item_index >= 0 and choice_sources.has(node_id):
+		var sources: Array = choice_sources[node_id]
+		if item_index < sources.size():
+			return sources[item_index]
 	var node_sources: Dictionary = compiled["node_sources"]
 	return node_sources.get(node_id, scene)
 

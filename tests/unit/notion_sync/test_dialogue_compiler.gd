@@ -2,6 +2,7 @@ extends "res://tests/support/test_case.gd"
 
 const COMPILER_PATH := "res://tools/notion_sync/dialogue_compiler.gd"
 const CLI_PATH := "res://tools/notion_sync/notion_sync_cli.gd"
+const CLI_HARNESS_PATH := "res://tests/support/notion_sync_cli_harness.gd"
 const FIXTURE_FACTORY_PATH := "res://tests/fixtures/notion/notion_fixture_factory.gd"
 
 var _request_count := 0
@@ -115,6 +116,8 @@ func _test_grouped_choice_and_character_provenance(compiler: Variant, fixture_fa
 	later_choice["notion_page_id"] = "choice2"
 	later_choice["source_url"] = "https://notion.so/choice2"
 	later_choice["order"] = 2.0
+	later_choice["text"] = ""
+	later_choice["target_flow"] = "missing"
 	later_choice["conditions"] = [{"kind":"stat", "key":"score", "operator":"contains", "value":1}]
 	later_choice["effects"] = [{"kind":"unsafe_call", "key":"bad", "value":"run()"}]
 	input["blocks"].append(later_choice)
@@ -127,6 +130,8 @@ func _test_grouped_choice_and_character_provenance(compiler: Variant, fixture_fa
 	assert_false(result["ok"], "grouped choice and character catalog validation errors fail")
 	assert_true(_has_issue(result["issues"], "invalid_condition", later_choice["source_url"]), "later grouped choice condition links to its own page")
 	assert_true(_has_issue(result["issues"], "invalid_effect", later_choice["source_url"]), "later grouped choice effect links to its own page")
+	assert_true(_has_issue(result["issues"], "invalid_field", later_choice["source_url"]), "later grouped choice required-field issue links to its own page")
+	assert_true(_has_issue(result["issues"], "dangling_target", later_choice["source_url"]), "later grouped choice dangling target links to its own page")
 	assert_true(_has_issue(result["issues"], "invalid_character_key", duplicate_character["source_url"]), "duplicate character issue links to the duplicate page")
 	assert_true(_has_issue(result["issues"], "invalid_character_key", "https://notion.so/char-empty"), "empty character issue links to the empty-key page")
 
@@ -194,7 +199,54 @@ func _test_cli_boundaries(cli: Variant, fixture_factory: Variant) -> void:
 	assert_false(transport_failure["ok"], "CLI returns a recorded transport failure")
 	assert_eq(_request_count, 1, "CLI stops after the first transport failure")
 	assert_eq(cli.exit_code_for(transport_failure), 1, "CLI maps transport failure to process failure")
+	_test_spawned_cli_termination(fixture_factory, test_root)
 	_remove_exact_tree(test_root)
+
+func _test_spawned_cli_termination(fixture_factory: Variant, test_root: String) -> void:
+	var cli_script: Script = load(CLI_PATH)
+	assert_true(_script_has_method(cli_script, "_get_arguments"), "production _run exposes its argument-source seam")
+	assert_true(_script_has_method(cli_script, "_get_configuration"), "production _run exposes its configuration-source seam")
+	assert_true(_script_has_method(cli_script, "_terminate"), "production _run exposes its termination sink")
+	if not _script_has_method(cli_script, "_get_arguments") or not _script_has_method(cli_script, "_get_configuration") or not _script_has_method(cli_script, "_terminate"):
+		return
+	var harness_script: Script = load(CLI_HARNESS_PATH)
+	var failure_harness: SceneTree = harness_script.new()
+	failure_harness.install(PackedStringArray(["--dry-run"]), {"ok":false, "message":"PROJECT_A_NOTION_TOKEN is required."})
+	await failure_harness._run()
+	assert_eq(failure_harness.captured_exit_code, 1, "production _run sends configuration failure to its nonzero termination sink")
+	failure_harness.free()
+	var mapped_input_path := test_root.path_join("mapped-input.json")
+	var mapped_file := FileAccess.open(mapped_input_path, FileAccess.WRITE)
+	assert_not_null(mapped_file, "spawned CLI mapped-input fixture opens")
+	if mapped_file == null:
+		return
+	mapped_file.store_string(JSON.stringify(fixture_factory.valid_dialogue_input(), "\t", true, true))
+	mapped_file.close()
+	var success_harness: SceneTree = harness_script.new()
+	success_harness.install(PackedStringArray(["--dry-run", "--mapped-input", mapped_input_path]), {})
+	await success_harness._run()
+	assert_eq(success_harness.captured_exit_code, 0, "production _run sends authorized mapped-input success to its zero termination sink")
+	success_harness.free()
+	var godot_binary := OS.get_environment("PROJECT_A_GODOT_BIN")
+	assert_true(FileAccess.file_exists(godot_binary), "spawned CLI smoke has the explicit editor binary")
+	if not FileAccess.file_exists(godot_binary):
+		return
+	var project_path := ProjectSettings.globalize_path("res://")
+	var output: Array = []
+	var variable_names := ["PROJECT_A_NOTION_TOKEN", "PROJECT_A_NOTION_SCENES_DATA_SOURCE", "PROJECT_A_NOTION_BLOCKS_DATA_SOURCE", "PROJECT_A_NOTION_CHARACTERS_DATA_SOURCE"]
+	var saved_values := {}
+	for variable_name: String in variable_names:
+		saved_values[variable_name] = OS.get_environment(variable_name)
+		OS.set_environment(variable_name, "")
+	var failure_exit := OS.execute(godot_binary, PackedStringArray(["--headless", "--path", project_path, "--script", "res://tools/notion_sync/notion_sync_cli.gd", "--", "--dry-run"]), output, true)
+	for variable_name: String in variable_names:
+		OS.set_environment(variable_name, String(saved_values[variable_name]))
+	assert_true(failure_exit != 0, "spawned production _run exits nonzero when environment authorization/configuration fails")
+	assert_true("PROJECT_A_NOTION_TOKEN" in "\n".join(output), "spawned production failure names the missing environment input without exposing a value")
+	output = []
+	var success_exit := OS.execute(godot_binary, PackedStringArray(["--headless", "--path", project_path, "--script", "res://tools/notion_sync/notion_sync_cli.gd", "--", "--dry-run", "--mapped-input", mapped_input_path]), output, true)
+	assert_eq(success_exit, 0, "spawned production _run exits zero for authorized offline mapped-input dry run")
+	assert_true("dry run" in "\n".join(output), "spawned production success reports dry-run completion")
 
 func _service_failure(_url: String, _headers: PackedStringArray, _body: String) -> Dictionary:
 	_request_count += 1
