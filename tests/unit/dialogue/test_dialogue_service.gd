@@ -36,7 +36,9 @@ func run() -> void:
 	_test_end_and_abort_restore_exact_mode(service_script)
 	_test_automatic_dispatch_and_guard(service_script)
 	_test_choice_filtering_index_stability_and_checkpoint(service_script)
+	_test_zero_visible_choices_fail_safely(service_script)
 	_test_runtime_failure_rolls_back_choice_effects(service_script)
+	_test_downstream_choice_failure_rolls_back_before_publication(service_script)
 	await _test_character_resources_and_view_scene()
 
 func _test_valid_branch(service_script: Variant) -> void:
@@ -212,6 +214,78 @@ func _test_runtime_failure_rolls_back_choice_effects(service_script: Variant) ->
 	service.free()
 	session.free()
 
+func _test_zero_visible_choices_fail_safely(service_script: Variant) -> void:
+	_reset_captures()
+	var nodes := {
+		"choice":{"type":"choice", "items":[{
+			"text":"hidden", "conditions":[{"kind":"flag", "key":"show_choice", "operator":"eq", "value":true}],
+			"effects":[{"kind":"flag_set", "key":"hidden_effect", "value":true}], "next":"end",
+		}]},
+		"end":{"type":"end"},
+	}
+	var session := _session_in_mode(GameModeResource.Value.CUTSCENE)
+	session.narrative_state.set_flag(&"preserved", true)
+	var before: Dictionary = session.narrative_state.snapshot()
+	var service: Variant = _service_for_graph(service_script, _graph("no_visible_choices", "choice", nodes), session)
+	assert_eq(service.start_dialogue(&"no_visible_choices"), ERR_UNAVAILABLE, "choice boundary without visible items fails")
+	assert_eq(session.current_mode, GameModeResource.Value.CUTSCENE, "empty filtered choice restores exact prior mode")
+	assert_eq(session.narrative_state.snapshot(), before, "empty filtered choice cannot mutate narrative state")
+	assert_eq(_choices.size(), 0, "empty filtered choice is not published to the view")
+	assert_eq(_failures.size(), 1, "empty filtered choice emits one failure")
+	if not _failures.is_empty():
+		assert_eq(_failures[-1].get("reason"), &"no_visible_choices", "empty filtered choice has stable failure context")
+	assert_eq(_finished_count, 0, "empty filtered choice is not reported as finished")
+	assert_eq(service.get_checkpoint(), {}, "empty filtered choice clears active dialogue")
+	service.free()
+	session.free()
+
+func _test_downstream_choice_failure_rolls_back_before_publication(service_script: Variant) -> void:
+	_reset_captures()
+	var nodes := {
+		"choice":{"type":"choice", "items":[{
+			"text":"continue", "conditions":[],
+			"effects":[{"kind":"flag_set", "key":"choice_transient", "value":true}],
+			"next":"automatic_effect",
+		}]},
+		"automatic_effect":{"type":"effect", "effects":[{"kind":"flag_set", "key":"auto_transient", "value":true}], "next":"broken_jump"},
+		"broken_jump":{"type":"jump", "next":"missing"},
+	}
+	var session := _session_in_mode(GameModeResource.Value.MENU)
+	session.narrative_state.set_flag(&"base_preserved", true)
+	var loader := GraphLoaderStub.new()
+	loader.graph_to_return = _graph("downstream_failure", "choice", nodes)
+	var service: Variant = service_script.new()
+	service.graph_loader = loader
+	service.game_session = session
+	service.narrative_state = session.narrative_state
+	var observation := {"count":0, "saw_rollback":false, "restart_error":FAILED}
+	service.failed.connect(func(context: Dictionary) -> void:
+		if context.get("reason") != &"invalid_next":
+			return
+		observation["count"] += 1
+		observation["saw_rollback"] = not session.narrative_state.get_flag(&"choice_transient") \
+			and not session.narrative_state.get_flag(&"auto_transient") \
+			and session.narrative_state.get_flag(&"base_preserved")
+		session.narrative_state.set_flag(&"listener_mutation", true)
+		loader.graph_to_return = _line_graph("reentrant")
+		observation["restart_error"] = service.start_dialogue(&"reentrant")
+	)
+	assert_eq(service.start_dialogue(&"downstream_failure"), OK, "downstream failure graph reaches choice")
+	assert_eq(service.choose(0), ERR_INVALID_DATA, "downstream automatic failure is returned from choose")
+	assert_eq(observation["count"], 1, "downstream failure emits once")
+	assert_true(observation["saw_rollback"], "failure listener observes the rolled-back transaction")
+	assert_eq(observation["restart_error"], OK, "failure listener may start a replacement dialogue")
+	assert_true(session.narrative_state.get_flag(&"listener_mutation"), "post-failure listener mutation is retained")
+	assert_true(session.narrative_state.get_flag(&"base_preserved"), "pre-choice state survives rollback")
+	assert_false(session.narrative_state.get_flag(&"choice_transient"), "choice effect is rolled back")
+	assert_false(session.narrative_state.get_flag(&"auto_transient"), "downstream automatic effect is rolled back")
+	assert_eq(service.current_node_id, &"line", "outer choose cleanup cannot erase reentrant dialogue")
+	assert_eq(session.current_mode, GameModeResource.Value.DIALOGUE, "reentrant dialogue retains dialogue mode")
+	service.abort_dialogue(&"test_cleanup")
+	assert_eq(session.current_mode, GameModeResource.Value.MENU, "reentrant dialogue restores its own prior mode")
+	service.free()
+	session.free()
+
 func _test_character_resources_and_view_scene() -> void:
 	var retti: Variant = load("res://data/characters/retti.tres")
 	var jellyppo: Variant = load("res://data/characters/jellyppo.tres")
@@ -251,6 +325,13 @@ func _test_character_resources_and_view_scene() -> void:
 	choice_container.get_child(0).pressed.emit()
 	GameSession.change_mode(global_previous)
 	assert_eq(_requested_choice_indices, [0], "view emits only the selected visible index")
+	view.hide_dialogue()
+	var choice_first_items: Array[Dictionary] = [{"text":"Choice-first boundary"}]
+	view.show_choices(choice_first_items)
+	await get_tree().process_frame
+	assert_eq(portrait.texture, null, "choice-first presentation after hide has no stale portrait")
+	assert_eq(name_label.text, "", "choice-first presentation after hide has no stale speaker")
+	assert_eq(text_label.text, "", "choice-first presentation after hide has no stale line")
 	view.queue_free()
 	await get_tree().process_frame
 

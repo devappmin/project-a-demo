@@ -55,6 +55,10 @@ func show_choices(items: Array[Dictionary]) -> void:
 func hide_dialogue(_context: Variant = null) -> void:
 	visible = false
 	_clear_choices()
+	portrait.texture = null
+	name_label.text = ""
+	text_label.text = ""
+	advance_indicator.visible = false
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not visible or choice_container.get_child_count() > 0:

@@ -19,6 +19,7 @@ var current_node_id: StringName = &""
 var _active := false
 var _previous_mode := GameModeResource.Value.EXPLORATION
 var _available_choices: Array[Dictionary] = []
+var _deferred_failure_reason: StringName = &""
 
 func _ready() -> void:
 	if graph_loader == null:
@@ -96,9 +97,12 @@ func choose(index: int) -> Error:
 		return _runtime_failure(ERR_INVALID_DATA, &"invalid_next")
 	_available_choices.clear()
 	current_node_id = next_id
-	var dispatch_error := _dispatch_until_boundary()
+	_deferred_failure_reason = &""
+	var dispatch_error := _dispatch_until_boundary(false)
 	if dispatch_error != OK:
 		narrative_state.restore(state_before)
+		var failure_reason := _deferred_failure_reason if not _deferred_failure_reason.is_empty() else &"dispatch_failed"
+		return _runtime_failure(dispatch_error, failure_reason)
 	return dispatch_error
 
 func abort_dialogue(reason: StringName) -> void:
@@ -114,12 +118,12 @@ func get_checkpoint() -> Dictionary:
 		"next_node_id": String(current_node_id),
 	}.duplicate(true)
 
-func _dispatch_until_boundary() -> Error:
+func _dispatch_until_boundary(publish_failure := true) -> Error:
 	var automatic_steps := 0
 	while _active:
 		var node := current_graph.get_node(current_node_id)
 		if node.is_empty():
-			return _runtime_failure(ERR_INVALID_DATA, &"missing_node")
+			return _dispatch_failure(ERR_INVALID_DATA, &"missing_node", publish_failure)
 		var node_type := String(node.get("type", ""))
 		match node_type:
 			"line":
@@ -132,6 +136,8 @@ func _dispatch_until_boundary() -> Error:
 				return OK
 			"choice":
 				_available_choices = _filtered_choices(node.get("items", []))
+				if _available_choices.is_empty():
+					return _dispatch_failure(ERR_UNAVAILABLE, &"no_visible_choices", publish_failure)
 				var public_items: Array[Dictionary] = []
 				for item: Dictionary in _available_choices:
 					public_items.append({"text":String(item.get("text", ""))})
@@ -142,27 +148,33 @@ func _dispatch_until_boundary() -> Error:
 				return OK
 			"effect", "command", "jump":
 				if automatic_steps >= MAX_AUTOMATIC_STEPS:
-					return _runtime_failure(ERR_CYCLIC_LINK, &"dispatch_guard")
+					return _dispatch_failure(ERR_CYCLIC_LINK, &"dispatch_guard", publish_failure)
 				automatic_steps += 1
 				if node_type == "effect":
 					var state_before := narrative_state.snapshot()
 					var effect_error := _apply_effects(node.get("effects", []))
 					if effect_error != OK:
 						narrative_state.restore(state_before)
-						return _runtime_failure(effect_error, &"effect_failed")
+						return _dispatch_failure(effect_error, &"effect_failed", publish_failure)
 				elif node_type == "command":
 					var command_value: Variant = node.get("command", {})
 					if typeof(command_value) != TYPE_DICTIONARY:
-						return _runtime_failure(ERR_INVALID_DATA, &"invalid_command")
+						return _dispatch_failure(ERR_INVALID_DATA, &"invalid_command", publish_failure)
 					var command: Dictionary = command_value
 					command_requested.emit(command.duplicate(true))
 				var next_id := _next_node_id(node)
 				if next_id.is_empty():
-					return _runtime_failure(ERR_INVALID_DATA, &"invalid_next")
+					return _dispatch_failure(ERR_INVALID_DATA, &"invalid_next", publish_failure)
 				current_node_id = next_id
 			_:
-				return _runtime_failure(ERR_INVALID_DATA, &"unsupported_node")
+				return _dispatch_failure(ERR_INVALID_DATA, &"unsupported_node", publish_failure)
 	return OK
+
+func _dispatch_failure(error: Error, reason: StringName, publish_failure: bool) -> Error:
+	if publish_failure:
+		return _runtime_failure(error, reason)
+	_deferred_failure_reason = reason
+	return error
 
 func _filtered_choices(items_value: Variant) -> Array[Dictionary]:
 	var visible: Array[Dictionary] = []
@@ -230,6 +242,7 @@ func _clear_active_state() -> void:
 	current_graph = null
 	current_node_id = &""
 	_available_choices.clear()
+	_deferred_failure_reason = &""
 
 func _emit_failure(context: Dictionary) -> void:
 	failed.emit(context.duplicate(true))
