@@ -28,6 +28,7 @@ func run() -> void:
 	_test_grouped_choice_and_character_provenance(compiler, fixture_factory)
 	_test_cross_platform_filename_namespace(compiler, fixture_factory)
 	_test_automatic_node_shapes_and_tiebreaking(compiler, fixture_factory)
+	_test_cli_result_presentation(cli)
 	await _test_cli_boundaries(cli, fixture_factory)
 
 func _test_deterministic_graph_compilation(compiler: Variant, fixture_factory: Variant) -> void:
@@ -201,6 +202,24 @@ func _test_cli_boundaries(cli: Variant, fixture_factory: Variant) -> void:
 	assert_eq(cli.exit_code_for(transport_failure), 1, "CLI maps transport failure to process failure")
 	_test_spawned_cli_termination(fixture_factory, test_root)
 	_remove_exact_tree(test_root)
+
+func _test_cli_result_presentation(cli: Variant) -> void:
+	assert_true(_script_has_method(cli, "format_result_lines"), "CLI exposes deterministic redacted result formatting")
+	if not _script_has_method(cli, "format_result_lines"):
+		return
+	var result := {
+		"ok":true,
+		"message":"test-secret must never be printed",
+		"counts":{"scenes":2, "blocks":6, "characters":1},
+		"manifest":{"files":{"foundation_inspect.json":"abc"}, "scenes":["foundation.inspect"]},
+		"issues":[{"severity":"warning", "code":"unknown_expression", "message":"test-secret mismatch", "source_url":"https://notion.so/source-row"}]
+	}
+	var lines: Dictionary = cli.format_result_lines(result, true, PackedStringArray(["test-secret"]))
+	var combined := "\n".join(lines.get("stdout", [])) + "\n" + "\n".join(lines.get("stderr", []))
+	assert_false(combined.contains("test-secret"), "CLI result formatting redacts configured secret values")
+	assert_true(combined.contains("2 scene(s), 6 block(s), 1 character(s)"), "CLI dry-run output reports redacted page counts")
+	assert_true(combined.contains("unknown_expression") and combined.contains("https://notion.so/source-row"), "CLI dry-run output includes source-linked validation diagnostics")
+	assert_true(combined.contains("manifest SHA-256"), "CLI success output includes the generated manifest hash")
 
 func _test_spawned_cli_termination(fixture_factory: Variant, test_root: String) -> void:
 	var cli_script: Script = load(CLI_PATH)

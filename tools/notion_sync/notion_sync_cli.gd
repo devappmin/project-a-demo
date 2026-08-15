@@ -18,14 +18,16 @@ func _run() -> void:
 	var output_dir := _argument_value(args, "--output-dir", DEFAULT_OUTPUT_DIR)
 	var mapped_input_path := _argument_value(args, "--mapped-input", "")
 	var result: Dictionary
+	var secrets := PackedStringArray()
 	if mapped_input_path.is_empty():
 		var config := _get_configuration()
+		secrets = _secret_values(config)
 		result = await sync(config, output_dir, dry_run) if config["ok"] else _configuration_failure(config)
 	elif not is_authorized_for(Engine.is_editor_hint(), OS.has_feature("editor"), _is_headless(), true):
 		result = {"ok":false, "issues":[], "message":"Mapped-input sync requires an explicitly authorized editor binary running headless.", "counts":{}}
 	else:
 		result = _run_mapped_file(mapped_input_path, output_dir, dry_run)
-	_present_result(result, dry_run)
+	_present_result(result, dry_run, secrets)
 	_terminate(exit_code_for(result))
 
 func _get_arguments() -> PackedStringArray:
@@ -37,17 +39,48 @@ func _get_configuration() -> Dictionary:
 func _terminate(exit_code: int) -> void:
 	quit(exit_code)
 
-func _present_result(result: Dictionary, dry_run: bool) -> void:
-	if not result["ok"]:
-		for issue: Dictionary in result.get("issues", []):
-			printerr("%s %s %s" % [issue.get("severity", "error"), issue.get("code", "sync_failed"), issue.get("source_url", "")])
-		if not String(result.get("message", "")).is_empty():
-			printerr(result["message"])
-		return
-	if not String(result.get("message", "")).is_empty():
-		print(result["message"])
-	var counts: Dictionary = result.get("counts", {})
-	print("Notion dialogue sync %s: %d scene(s), %d block(s), %d character(s)." % ["dry run" if dry_run else "complete", counts.get("scenes", 0), counts.get("blocks", 0), counts.get("characters", 0)])
+func _present_result(result: Dictionary, dry_run: bool, secrets: PackedStringArray = PackedStringArray()) -> void:
+	var lines := format_result_lines(result, dry_run, secrets)
+	for line: String in lines["stdout"]:
+		print(line)
+	for line: String in lines["stderr"]:
+		printerr(line)
+
+static func format_result_lines(result: Dictionary, dry_run: bool, secrets: PackedStringArray = PackedStringArray()) -> Dictionary:
+	var stdout: Array[String] = []
+	var stderr: Array[String] = []
+	var issue_values: Variant = result.get("issues", [])
+	if typeof(issue_values) == TYPE_ARRAY:
+		for issue_value: Variant in issue_values:
+			if typeof(issue_value) != TYPE_DICTIONARY:
+				continue
+			var issue: Dictionary = issue_value
+			var line := "%s %s %s %s" % [issue.get("severity", "error"), issue.get("code", "sync_failed"), issue.get("message", ""), issue.get("source_url", "")]
+			stderr.append(_redact(line.strip_edges(), secrets))
+	var message := _redact(String(result.get("message", "")), secrets)
+	if not message.is_empty():
+		(stdout if bool(result.get("ok", false)) else stderr).append(message)
+	if bool(result.get("ok", false)):
+		var counts: Dictionary = result.get("counts", {})
+		stdout.append("Notion dialogue sync %s: %d scene(s), %d block(s), %d character(s)." % ["dry run" if dry_run else "complete", counts.get("scenes", 0), counts.get("blocks", 0), counts.get("characters", 0)])
+		var manifest_value: Variant = result.get("manifest", {})
+		if typeof(manifest_value) == TYPE_DICTIONARY and not manifest_value.is_empty():
+			stdout.append("manifest SHA-256: %s" % Compiler.stable_json(manifest_value).sha256_text())
+	return {"stdout":stdout, "stderr":stderr}
+
+static func _secret_values(config: Dictionary) -> PackedStringArray:
+	var values := PackedStringArray()
+	for key: String in ["token", "scenes_data_source", "blocks_data_source", "characters_data_source"]:
+		var value := String(config.get(key, ""))
+		if not value.is_empty():
+			values.append(value)
+	return values
+
+static func _redact(text: String, secrets: PackedStringArray) -> String:
+	var redacted := text
+	for secret: String in secrets:
+		redacted = redacted.replace(secret, "[REDACTED]")
+	return redacted
 
 static func _run_mapped_file(path: String, output_dir: String, dry_run: bool) -> Dictionary:
 	if not FileAccess.file_exists(path):
