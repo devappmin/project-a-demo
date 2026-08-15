@@ -13,8 +13,16 @@ func run() -> void:
 	var snapshot := state.snapshot()
 	var snapshot_inventory_value: Variant = snapshot.get("inventory", {})
 	assert_true(typeof(snapshot_inventory_value) == TYPE_DICTIONARY, "snapshot contains an inventory dictionary")
-	if typeof(snapshot_inventory_value) == TYPE_DICTIONARY and typeof(snapshot_inventory_value.get("lunch")) == TYPE_DICTIONARY:
-		snapshot_inventory_value["lunch"]["sandwich"] = 2
+	if typeof(snapshot_inventory_value) != TYPE_DICTIONARY:
+		return
+	assert_true(snapshot_inventory_value.has("lunch"), "snapshot inventory contains the required lunch entry")
+	if not snapshot_inventory_value.has("lunch"):
+		return
+	var snapshot_lunch_value: Variant = snapshot_inventory_value.get("lunch")
+	assert_true(typeof(snapshot_lunch_value) == TYPE_DICTIONARY, "snapshot lunch entry is a dictionary")
+	if typeof(snapshot_lunch_value) != TYPE_DICTIONARY:
+		return
+	snapshot_lunch_value["sandwich"] = 2
 	var state_lunch_value: Variant = state.inventory.get("lunch", {})
 	assert_true(typeof(state_lunch_value) == TYPE_DICTIONARY, "state retains its nested lunch inventory")
 	if typeof(state_lunch_value) == TYPE_DICTIONARY:
@@ -26,8 +34,17 @@ func run() -> void:
 	var isolated_restore := NarrativeState.new()
 	assert_eq(isolated_restore.restore(restore_source), OK, "restore accepts a valid snapshot")
 	var restore_inventory_value: Variant = restore_source.get("inventory", {})
-	if typeof(restore_inventory_value) == TYPE_DICTIONARY and typeof(restore_inventory_value.get("lunch")) == TYPE_DICTIONARY:
-		restore_inventory_value["lunch"]["sandwich"] = 3
+	assert_true(typeof(restore_inventory_value) == TYPE_DICTIONARY, "restore source contains an inventory dictionary")
+	if typeof(restore_inventory_value) != TYPE_DICTIONARY:
+		return
+	assert_true(restore_inventory_value.has("lunch"), "restore source inventory contains the required lunch entry")
+	if not restore_inventory_value.has("lunch"):
+		return
+	var restore_lunch_value: Variant = restore_inventory_value.get("lunch")
+	assert_true(typeof(restore_lunch_value) == TYPE_DICTIONARY, "restore source lunch entry is a dictionary")
+	if typeof(restore_lunch_value) != TYPE_DICTIONARY:
+		return
+	restore_lunch_value["sandwich"] = 3
 	var isolated_lunch_value: Variant = isolated_restore.inventory.get("lunch", {})
 	assert_true(typeof(isolated_lunch_value) == TYPE_DICTIONARY, "restored state contains its nested lunch inventory")
 	if typeof(isolated_lunch_value) == TYPE_DICTIONARY:

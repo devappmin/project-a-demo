@@ -32,8 +32,13 @@ func _validate_fixture_contract(validator: Variant) -> void:
 	assert_true(not issues.is_empty(), "broken fixture produces at least one issue")
 	if issues.is_empty():
 		return
-	assert_eq(issues[0]["code"], "dangling_target", "broken target is reported first")
-	assert_eq(issues[0]["node_id"], "line_1", "broken target identifies its node")
+	var first_issue_value: Variant = issues[0]
+	assert_true(typeof(first_issue_value) == TYPE_DICTIONARY, "broken fixture first issue has the public dictionary shape")
+	if typeof(first_issue_value) != TYPE_DICTIONARY:
+		return
+	var first_issue: Dictionary = first_issue_value
+	assert_eq(first_issue["code"], "dangling_target", "broken target is reported first")
+	assert_eq(first_issue["node_id"], "line_1", "broken target identifies its node")
 	for issue: Dictionary in issues:
 		var public_keys: Array = issue.keys()
 		public_keys.sort()
@@ -141,20 +146,49 @@ func _validate_graph_immutability(graph_script: Variant) -> void:
 	if typeof(source_value) != TYPE_DICTIONARY:
 		return
 	var source: Dictionary = source_value
+	var source_nodes_value: Variant = source.get("nodes")
+	assert_true(typeof(source_nodes_value) == TYPE_DICTIONARY, "immutable graph fixture contains a nodes dictionary")
+	if typeof(source_nodes_value) != TYPE_DICTIONARY:
+		return
+	var source_nodes: Dictionary = source_nodes_value
+	assert_true(source_nodes.has("line_1"), "immutable graph fixture contains its required line")
+	if not source_nodes.has("line_1"):
+		return
+	var source_line_value: Variant = source_nodes.get("line_1")
+	assert_true(typeof(source_line_value) == TYPE_DICTIONARY, "immutable graph fixture line is a dictionary")
+	if typeof(source_line_value) != TYPE_DICTIONARY:
+		return
+	var source_line: Dictionary = source_line_value
 	var graph: Variant = graph_script.from_dictionary(source)
 	assert_not_null(graph, "immutable graph can be constructed")
 	if graph == null:
 		return
-	source["nodes"]["line_1"]["text"] = "mutated source"
-	var node: Dictionary = graph.get_node(&"line_1")
+	source_line["text"] = "mutated source"
+	var node_value: Variant = graph.get_node(&"line_1")
+	assert_true(typeof(node_value) == TYPE_DICTIONARY, "graph getter returns the fixture line as a dictionary")
+	if typeof(node_value) != TYPE_DICTIONARY:
+		return
+	var node: Dictionary = node_value
 	assert_eq(node.get("text", ""), "낯선 거울이다.", "graph deep-copies its source")
 	node["text"] = "mutated getter"
-	var public_nodes: Dictionary = graph.nodes
-	var public_line_value: Variant = public_nodes.get("line_1", {})
+	var public_nodes_value: Variant = graph.nodes
+	assert_true(typeof(public_nodes_value) == TYPE_DICTIONARY, "graph exposes its public nodes as a dictionary")
+	if typeof(public_nodes_value) != TYPE_DICTIONARY:
+		return
+	var public_nodes: Dictionary = public_nodes_value
+	assert_true(public_nodes.has("line_1"), "graph public nodes contain the fixture line")
+	if not public_nodes.has("line_1"):
+		return
+	var public_line_value: Variant = public_nodes.get("line_1")
 	assert_true(typeof(public_line_value) == TYPE_DICTIONARY, "graph node property contains the fixture line")
-	if typeof(public_line_value) == TYPE_DICTIONARY:
-		public_line_value["text"] = "mutated property"
-	assert_eq(graph.get_node(&"line_1").get("text", ""), "낯선 거울이다.", "graph never exposes mutable node storage")
+	if typeof(public_line_value) != TYPE_DICTIONARY:
+		return
+	public_line_value["text"] = "mutated property"
+	var unchanged_line_value: Variant = graph.get_node(&"line_1")
+	assert_true(typeof(unchanged_line_value) == TYPE_DICTIONARY, "graph getter still returns a dictionary after public mutation")
+	if typeof(unchanged_line_value) != TYPE_DICTIONARY:
+		return
+	assert_eq(unchanged_line_value.get("text", ""), "낯선 거울이다.", "graph never exposes mutable node storage")
 	graph.scene_key = &"mutated"
 	graph.entry_node = &"mutated"
 	assert_eq(graph.scene_key, &"valid.branch", "graph scene keys are immutable")

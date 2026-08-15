@@ -55,8 +55,11 @@ func run() -> void:
 	_test_production_fixture_is_immutable()
 	_test_invalid_adapter_payloads_are_ignored(router, dialogue)
 	_test_talk_payload_starts_and_abort_restores(router, dialogue, view)
+	_test_empty_override_starts_at_entry(router, dialogue, view)
 	await _test_visible_mirror_keyboard_flow(app, router, dialogue, view, probe)
+	var original_dialogue_loader: DialogueGraphLoader = dialogue.graph_loader
 	await _test_plan3_replacement_snapshot(app, dialogue, view, probe)
+	assert_eq(dialogue.graph_loader, original_dialogue_loader, "replacement snapshot restores the exact original dialogue loader")
 
 	if dialogue.current_graph != null:
 		dialogue.abort_dialogue(&"test_cleanup")
@@ -95,16 +98,28 @@ func _test_production_fixture_is_immutable() -> void:
 	if typeof(items_value) != TYPE_ARRAY or items_value.is_empty():
 		return
 	var items: Array = items_value
-	var original_text := String(items[0].get("text", "")) if typeof(items[0]) == TYPE_DICTIONARY else ""
-	assert_false(original_text.is_empty(), "production choice item has text")
-	if typeof(items[0]) != TYPE_DICTIONARY or original_text.is_empty():
+	var first_item_value: Variant = items[0]
+	assert_true(typeof(first_item_value) == TYPE_DICTIONARY, "production first choice item is a dictionary")
+	if typeof(first_item_value) != TYPE_DICTIONARY:
 		return
-	items[0]["text"] = "mutated"
+	var first_item: Dictionary = first_item_value
+	var original_text := String(first_item.get("text", ""))
+	assert_false(original_text.is_empty(), "production choice item has text")
+	if original_text.is_empty():
+		return
+	first_item["text"] = "mutated"
 	var unchanged := graph.get_node(choice_id)
 	var unchanged_items_value: Variant = unchanged.get("items", [])
 	assert_true(typeof(unchanged_items_value) == TYPE_ARRAY and not unchanged_items_value.is_empty(), "immutable graph still returns its choice items")
-	if typeof(unchanged_items_value) == TYPE_ARRAY and not unchanged_items_value.is_empty() and typeof(unchanged_items_value[0]) == TYPE_DICTIONARY:
-		assert_eq(unchanged_items_value[0].get("text", ""), original_text, "fixture choices are returned as deep copies")
+	if typeof(unchanged_items_value) != TYPE_ARRAY or unchanged_items_value.is_empty():
+		return
+	var unchanged_items: Array = unchanged_items_value
+	var unchanged_first_value: Variant = unchanged_items[0]
+	assert_true(typeof(unchanged_first_value) == TYPE_DICTIONARY, "unchanged first choice item is a dictionary")
+	if typeof(unchanged_first_value) != TYPE_DICTIONARY:
+		return
+	var unchanged_first: Dictionary = unchanged_first_value
+	assert_eq(unchanged_first.get("text", ""), original_text, "fixture choices are returned as deep copies")
 
 func _test_invalid_adapter_payloads_are_ignored(router: InteractionRouter, dialogue: DialogueService) -> void:
 	var invalid_requests: Array[Dictionary] = [
@@ -128,6 +143,17 @@ func _test_talk_payload_starts_and_abort_restores(router: InteractionRouter, dia
 	dialogue.abort_dialogue(&"test_cleanup")
 	assert_eq(GameSession.current_mode, GameModeResource.Value.EXPLORATION, "abort restores exploration")
 	assert_false(view.visible, "abort hides the dialogue view")
+
+func _test_empty_override_starts_at_entry(router: InteractionRouter, dialogue: DialogueService, view: DialogueView) -> void:
+	router.action_requested.emit(&"inspect", {"scene_key":&"foundation.inspect", "node_id":&""})
+	assert_eq(GameSession.current_mode, GameModeResource.Value.DIALOGUE, "explicit empty node override enters dialogue")
+	assert_not_null(dialogue.current_graph, "explicit empty node override loads the production graph")
+	if dialogue.current_graph == null:
+		return
+	assert_eq(dialogue.current_node_id, dialogue.current_graph.entry_node, "explicit empty node override uses the loaded graph entry")
+	dialogue.abort_dialogue(&"test_cleanup")
+	assert_eq(GameSession.current_mode, GameModeResource.Value.EXPLORATION, "empty-override abort restores exploration")
+	assert_false(view.visible, "empty-override abort hides the dialogue view")
 
 func _test_visible_mirror_keyboard_flow(app: Node, router: InteractionRouter, dialogue: DialogueService, view: DialogueView, probe: UnhandledInputProbe) -> void:
 	var room := app.get_node_or_null("WorldHost/FoundationRoom") as MapScene
@@ -219,7 +245,13 @@ func _test_visible_mirror_keyboard_flow(app: Node, router: InteractionRouter, di
 func _test_plan3_replacement_snapshot(app: Node, dialogue: DialogueService, view: DialogueView, probe: UnhandledInputProbe) -> void:
 	var output_directory := "user://test-output/dialogue-plan3-%s" % Time.get_ticks_usec()
 	var absolute_directory := ProjectSettings.globalize_path(output_directory)
-	assert_eq(DirAccess.make_dir_recursive_absolute(absolute_directory), OK, "replacement snapshot directory is created")
+	var snapshot_path := output_directory.path_join("foundation_inspect.json")
+	var original_loader: DialogueGraphLoader = dialogue.graph_loader
+	var directory_error := DirAccess.make_dir_recursive_absolute(absolute_directory)
+	assert_eq(directory_error, OK, "replacement snapshot directory is created")
+	if directory_error != OK:
+		_cleanup_plan3_replacement(dialogue, original_loader, snapshot_path, absolute_directory)
+		return
 	var replacement := {
 		"schema_version":1,
 		"scene_key":"foundation.inspect",
@@ -234,11 +266,10 @@ func _test_plan3_replacement_snapshot(app: Node, dialogue: DialogueService, view
 			"f6bb116187bd4cf69c09f002fb07c9d8":{"type":"end"}
 		}
 	}
-	var snapshot_path := output_directory.path_join("foundation_inspect.json")
 	var file := FileAccess.open(snapshot_path, FileAccess.WRITE)
 	assert_not_null(file, "replacement snapshot file opens")
 	if file == null:
-		DirAccess.remove_absolute(absolute_directory)
+		_cleanup_plan3_replacement(dialogue, original_loader, snapshot_path, absolute_directory)
 		return
 	file.store_string(JSON.stringify(replacement))
 	file.close()
@@ -249,12 +280,14 @@ func _test_plan3_replacement_snapshot(app: Node, dialogue: DialogueService, view
 	var room := app.get_node_or_null("WorldHost/FoundationRoom") as MapScene
 	assert_not_null(room, "replacement snapshot uses the real foundation room")
 	if room == null:
+		_cleanup_plan3_replacement(dialogue, original_loader, snapshot_path, absolute_directory)
 		return
 	var player := room.get_node_or_null("Player") as PlayerController
 	var mirror := room.get_node_or_null("VisualSort/SampleInspectable") as InteractionTarget
 	assert_not_null(player, "replacement snapshot uses the real player")
 	assert_not_null(mirror, "replacement snapshot uses the real mirror")
 	if player == null or mirror == null:
+		_cleanup_plan3_replacement(dialogue, original_loader, snapshot_path, absolute_directory)
 		return
 	player.position = mirror.position - Vector2(32, 0)
 	player.facing = Vector2.RIGHT
@@ -270,20 +303,31 @@ func _test_plan3_replacement_snapshot(app: Node, dialogue: DialogueService, view
 	var choices := view.get_node_or_null("Panel/Margin/Layout/Content/ChoiceScroll/ChoiceContainer") as VBoxContainer
 	assert_not_null(choices, "replacement snapshot reaches the real choice container")
 	if choices == null:
-		if dialogue.current_graph != null:
-			dialogue.abort_dialogue(&"test_cleanup")
-		dialogue.graph_loader = DialogueGraphLoader.new()
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(snapshot_path))
-		DirAccess.remove_absolute(absolute_directory)
+		_cleanup_plan3_replacement(dialogue, original_loader, snapshot_path, absolute_directory)
 		return
 	assert_eq(choices.get_child_count(), 2, "replacement snapshot publishes its choices")
-	if choices.get_child_count() == 2:
-		choices.get_child(0).pressed.emit()
+	if choices.get_child_count() != 2:
+		_cleanup_plan3_replacement(dialogue, original_loader, snapshot_path, absolute_directory)
+		return
+	var first_choice := choices.get_child(0) as Button
+	assert_not_null(first_choice, "replacement snapshot first choice is a button")
+	if first_choice == null:
+		_cleanup_plan3_replacement(dialogue, original_loader, snapshot_path, absolute_directory)
+		return
+	first_choice.pressed.emit()
 	assert_true(GameSession.narrative_state.get_flag(&"mirror_seen"), "replacement snapshot choice applies mirror_seen offline")
 	assert_eq(GameSession.current_mode, GameModeResource.Value.EXPLORATION, "replacement snapshot restores exploration")
-	dialogue.graph_loader = DialogueGraphLoader.new()
-	DirAccess.remove_absolute(ProjectSettings.globalize_path(snapshot_path))
-	DirAccess.remove_absolute(absolute_directory)
+	_cleanup_plan3_replacement(dialogue, original_loader, snapshot_path, absolute_directory)
+
+func _cleanup_plan3_replacement(dialogue: DialogueService, original_loader: DialogueGraphLoader, snapshot_path: String, absolute_directory: String) -> void:
+	if dialogue.current_graph != null:
+		dialogue.abort_dialogue(&"test_cleanup")
+	dialogue.graph_loader = original_loader
+	var absolute_snapshot_path := ProjectSettings.globalize_path(snapshot_path)
+	if FileAccess.file_exists(absolute_snapshot_path):
+		DirAccess.remove_absolute(absolute_snapshot_path)
+	if DirAccess.dir_exists_absolute(absolute_directory):
+		DirAccess.remove_absolute(absolute_directory)
 
 func _advance_to_choice(dialogue: DialogueService) -> int:
 	var line_count := 0
