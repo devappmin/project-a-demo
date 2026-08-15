@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "scene_key": "dangling.target",
+  "entry_node": "line_1",
+  "nodes": {
+    "line_1": {"type":"line", "speaker":"retti", "expression":"uneasy", "text":"길이 끊겼다.", "next":"missing_node"}
+  }
+}

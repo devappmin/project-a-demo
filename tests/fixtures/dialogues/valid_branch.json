@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "scene_key": "valid.branch",
+  "entry_node": "line_1",
+  "nodes": {
+    "line_1": {"type":"line", "speaker":"retti", "expression":"uneasy", "text":"낯선 거울이다.", "next":"choice_1"},
+    "choice_1": {"type":"choice", "items":[
+      {"text":"자세히 본다", "conditions":[], "effects":[{"kind":"flag_set", "key":"mirror_seen", "value":true}], "next":"end_1"},
+      {"text":"뒤로 물러난다", "conditions":[], "effects":[], "next":"end_1"}
+    ]},
+    "end_1": {"type":"end"}
+  }
+}
