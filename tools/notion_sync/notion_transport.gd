@@ -4,13 +4,16 @@ class_name NotionTransport
 
 const API_VERSION := "2026-03-11"
 const API_ROOT := "https://api.notion.com/v1/data_sources/"
+const SyncConfig = preload("res://tools/notion_sync/notion_sync_config.gd")
 
 var _token: String
 var _request_executor: Callable
+var _allow_headless_sync: bool
 
-func _init(token: String, request_executor: Callable = Callable()) -> void:
+func _init(token: String, request_executor: Callable = Callable(), allow_headless_sync: bool = false) -> void:
 	_token = token
 	_request_executor = request_executor
+	_allow_headless_sync = allow_headless_sync
 
 static func build_query_body(sorts: Array[Dictionary], cursor: String = "") -> Dictionary:
 	var body: Dictionary = {"page_size": 100, "sorts": sorts.duplicate(true)}
@@ -19,10 +22,13 @@ static func build_query_body(sorts: Array[Dictionary], cursor: String = "") -> D
 	return body
 
 func query_all(data_source_id: String, sorts: Array[Dictionary]) -> Dictionary:
-	if not _is_editor_or_headless():
-		return _failure(0, "Notion sync transport is only available in editor or headless tooling.")
+	if not SyncConfig.is_available_for(Engine.is_editor_hint(), OS.has_feature("editor"), _is_headless(), _allow_headless_sync):
+		return _failure(0, "Notion sync transport is only available in editor or explicitly authorized editor CLI tooling.")
 	if data_source_id.strip_edges().is_empty():
 		return _failure(0, "A Notion data source ID is required before querying.")
+	var sort_validation := _validate_sorts(sorts)
+	if not sort_validation["ok"]:
+		return _failure(0, String(sort_validation["message"]))
 	if _token.strip_edges().is_empty():
 		return _failure(0, "Notion credentials are missing. Set PROJECT_A_NOTION_TOKEN.")
 	var pages: Array = []
@@ -49,6 +55,19 @@ func _headers(token: String) -> PackedStringArray:
 		"Notion-Version: " + API_VERSION,
 		"Content-Type: application/json"
 	])
+
+func _validate_sorts(sorts: Array[Dictionary]) -> Dictionary:
+	if sorts.is_empty():
+		return {"ok": false, "message": "At least one explicit Notion sort is required for deterministic sync output."}
+	for sort: Dictionary in sorts:
+		var property := String(sort.get("property", "")).strip_edges()
+		var timestamp := String(sort.get("timestamp", "")).strip_edges()
+		var direction := String(sort.get("direction", "")).strip_edges()
+		if (property.is_empty() and timestamp.is_empty()) or (not property.is_empty() and not timestamp.is_empty()):
+			return {"ok": false, "message": "Each Notion sort must specify exactly one property or timestamp."}
+		if direction != "ascending" and direction != "descending":
+			return {"ok": false, "message": "Each Notion sort must use ascending or descending direction."}
+	return {"ok": true, "message": ""}
 
 func _send_query(data_source_id: String, body: Dictionary) -> Dictionary:
 	var url := API_ROOT + data_source_id.uri_encode() + "/query"
@@ -102,6 +121,8 @@ func _parse_page_response(status_code: int, body: String) -> Dictionary:
 	var parsed: Variant = parser.data
 	if typeof(parsed) != TYPE_DICTIONARY:
 		return _failure(status_code, "Notion returned malformed JSON. Retry the sync, then check the integration if it persists.")
+	if String(parsed.get("object", "")) != "list" or String(parsed.get("type", "")) != "page_or_data_source":
+		return _failure(status_code, "Notion returned a malformed data-source query list envelope. Verify the API response and retry.")
 	if typeof(parsed.get("results")) != TYPE_ARRAY or typeof(parsed.get("has_more")) != TYPE_BOOL:
 		return _failure(status_code, "Notion returned malformed JSON for a data source query.")
 	var next_cursor: Variant = parsed.get("next_cursor")
@@ -112,5 +133,5 @@ func _parse_page_response(status_code: int, body: String) -> Dictionary:
 func _failure(status_code: int, message: String) -> Dictionary:
 	return {"ok": false, "pages": [], "status_code": status_code, "message": message}
 
-func _is_editor_or_headless() -> bool:
-	return Engine.is_editor_hint() or OS.has_feature("headless") or DisplayServer.get_name() == "headless"
+func _is_headless() -> bool:
+	return OS.has_feature("headless") or DisplayServer.get_name() == "headless"
