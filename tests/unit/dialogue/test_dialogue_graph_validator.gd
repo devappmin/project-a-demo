@@ -78,6 +78,29 @@ func _validate_rule_shapes(validator: Variant) -> void:
 	assert_true(_has_code_at(issues, "invalid_effect", "choice"), "unsupported effect kinds are rejected")
 	assert_true(_has_code_at(issues, "invalid_effect", "effect"), "effect node values are validated")
 	assert_true(_has_code_at(issues, "invalid_field", "command"), "command nodes require a dictionary payload")
+	var runtime_mismatch := _minimal_graph()
+	runtime_mismatch["entry_node"] = "choice"
+	runtime_mismatch["nodes"] = {
+		"choice": {"type":"choice", "items":[{
+			"text":"runtime type mismatch",
+			"conditions":[
+				{"kind":&"flag", "key":"flag_key", "operator":"eq", "value":true},
+				{"kind":"flag", "key":&"flag_key", "operator":"eq", "value":true},
+				{"kind":"flag", "key":"flag_key", "operator":&"eq", "value":true},
+				{"kind":"quest", "key":"quest_key", "operator":"eq", "value":&"started"}
+			],
+			"effects":[
+				{"kind":&"flag_set", "key":"flag_key", "value":true},
+				{"kind":"flag_set", "key":&"flag_key", "value":true},
+				{"kind":"quest_set", "key":"quest_key", "value":&"started"}
+			],
+			"next":"end"
+		}]},
+		"end": {"type":"end"}
+	}
+	var mismatch_issues: Array = _validate(validator, runtime_mismatch, [&"retti"])
+	assert_eq(_count_code(mismatch_issues, "invalid_condition"), 4, "validator rejects every condition StringName that runtime rejects")
+	assert_eq(_count_code(mismatch_issues, "invalid_effect"), 3, "validator rejects every effect StringName that runtime rejects")
 
 func _validate_reachable_cycles(validator: Variant) -> void:
 	var trapped := _minimal_graph()
@@ -125,6 +148,10 @@ func _validate_loader(loader_script: Variant) -> void:
 	var graph: Variant = loader.load_scene(&"valid.branch")
 	assert_not_null(graph, "loader resolves dotted scene keys below its base directory")
 	assert_eq(graph.scene_key, &"valid.branch", "loaded graph retains the requested scene key")
+	var unicode_graph: Variant = loader.load_scene(StringName(".장면."))
+	assert_not_null(unicode_graph, "loader accepts confined Unicode scene keys with safe edge dots")
+	if unicode_graph != null:
+		assert_eq(unicode_graph.scene_key, StringName(".장면."), "loader preserves the Unicode scene key while mapping dots in its filename")
 	assert_eq(loader.load_scene(&"dangling.target"), null, "loader never returns a graph that failed validation")
 	assert_eq(loader.last_failure["code"], "validation_failed", "loader reports validation failure")
 	assert_eq(loader.load_scene(&"malformed"), null, "loader rejects malformed JSON")
@@ -135,6 +162,8 @@ func _validate_loader(loader_script: Variant) -> void:
 	assert_eq(loader.last_failure["code"], "load_failed", "loader reports load failure")
 	assert_eq(loader.load_scene(StringName("../valid.branch")), null, "loader rejects path separators in scene keys")
 	assert_eq(loader.last_failure["code"], "unsafe_scene_key", "loader reports unsafe scene keys")
+	assert_eq(loader.load_scene(StringName("..\\valid.branch")), null, "loader rejects Windows path separators in scene keys")
+	assert_eq(loader.last_failure["code"], "unsafe_scene_key", "loader reports unsafe Windows scene keys")
 
 func _minimal_graph() -> Dictionary:
 	return {
@@ -152,6 +181,13 @@ func _has_code(issues: Array, code: String) -> bool:
 		if issue["code"] == code:
 			return true
 	return false
+
+func _count_code(issues: Array, code: String) -> int:
+	var count := 0
+	for issue: Dictionary in issues:
+		if issue["code"] == code:
+			count += 1
+	return count
 
 func _has_code_at(issues: Array, code: String, node_id: String) -> bool:
 	for issue: Dictionary in issues:

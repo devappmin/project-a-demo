@@ -59,17 +59,9 @@ func _scene_path(scene_key: String) -> String:
 	return path
 
 func _scene_key_is_safe(scene_key: String) -> bool:
-	if scene_key.is_empty() or scene_key.begins_with(".") or scene_key.ends_with("."):
-		return false
-	for index: int in scene_key.length():
-		var code := scene_key.unicode_at(index)
-		var allowed := code >= 48 and code <= 57 \
-			or code >= 65 and code <= 90 \
-			or code >= 97 and code <= 122 \
-			or code in [45, 46, 95]
-		if not allowed:
-			return false
-	return true
+	return not scene_key.is_empty() \
+		and not scene_key.contains("/") \
+		and not scene_key.contains("\\")
 
 func _fail(code: String, message: String, path := "") -> void:
 	last_failure = {"code": code, "message": message, "path": path}

@@ -170,7 +170,7 @@ static func _condition_is_valid(value: Variant) -> bool:
 	var condition: Dictionary = value
 	if not condition.has_all(["kind", "key", "operator", "value"]):
 		return false
-	if not _is_nonempty_string(condition["kind"]) or not _is_nonempty_string(condition["key"]) or not _is_string(condition["operator"]):
+	if not _is_nonempty_runtime_string(condition["kind"]) or not _is_nonempty_runtime_string(condition["key"]) or typeof(condition["operator"]) != TYPE_STRING:
 		return false
 	var kind := String(condition["kind"])
 	var operator_name := String(condition["operator"])
@@ -187,7 +187,7 @@ static func _condition_is_valid(value: Variant) -> bool:
 				return typeof(expected) == TYPE_BOOL
 			return operator_name in COMPARISON_OPERATORS and _is_number(expected)
 		"quest":
-			return operator_name in ["eq", "neq"] and _is_string(expected)
+			return operator_name in ["eq", "neq"] and typeof(expected) == TYPE_STRING
 	return false
 
 static func _validate_effects(value: Variant, node_id: String, context: String, scene_key: String, issues: Array[Dictionary]) -> void:
@@ -204,7 +204,7 @@ static func _effect_is_valid(value: Variant) -> bool:
 	var effect: Dictionary = value
 	if not effect.has_all(["kind", "key", "value"]):
 		return false
-	if not _is_nonempty_string(effect["kind"]) or not _is_nonempty_string(effect["key"]):
+	if not _is_nonempty_runtime_string(effect["kind"]) or not _is_nonempty_runtime_string(effect["key"]):
 		return false
 	var kind := String(effect["kind"])
 	var effect_value: Variant = effect["value"]
@@ -218,7 +218,7 @@ static func _effect_is_valid(value: Variant) -> bool:
 		"inventory_add", "inventory_remove", "collectible_add":
 			return _is_number(effect_value) and effect_value >= 0.0
 		"quest_set":
-			return _is_string(effect_value)
+			return typeof(effect_value) == TYPE_STRING
 	return false
 
 static func _validate_reachable_cycle_exits(data: Dictionary, nodes: Dictionary, adjacency: Dictionary, scene_key: String, issues: Array[Dictionary]) -> void:
@@ -294,6 +294,9 @@ static func _is_string(value: Variant) -> bool:
 
 static func _is_nonempty_string(value: Variant) -> bool:
 	return _is_string(value) and not String(value).is_empty()
+
+static func _is_nonempty_runtime_string(value: Variant) -> bool:
+	return typeof(value) == TYPE_STRING and not String(value).is_empty()
 
 static func _is_number(value: Variant) -> bool:
 	return typeof(value) == TYPE_INT or typeof(value) == TYPE_FLOAT
