@@ -76,7 +76,7 @@ func run() -> void:
 - [ ] **Step 2: Add the runner wrapper and verify the test fails**
 
 ```powershell
-param([Parameter(ValueFromRemainingArguments = $true)][string[]]$GodotArgs)
+$GodotArgs = $args
 $ErrorActionPreference = "Stop"
 $projectAGodotExe = $env:PROJECT_A_GODOT_BIN
 if ([string]::IsNullOrWhiteSpace($projectAGodotExe)) {

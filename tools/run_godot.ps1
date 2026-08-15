@@ -1,4 +1,4 @@
-param([Parameter(ValueFromRemainingArguments = $true)][string[]]$GodotArgs)
+$GodotArgs = $args
 $ErrorActionPreference = "Stop"
 $projectAGodotExe = $env:PROJECT_A_GODOT_BIN
 if ([string]::IsNullOrWhiteSpace($projectAGodotExe)) {
