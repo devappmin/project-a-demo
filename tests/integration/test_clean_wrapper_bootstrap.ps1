@@ -4,20 +4,26 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $fixtureRoot = Join-Path $repoRoot "tests\fixtures\fresh_project"
 $scratchRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("project-a-clean-wrapper-" + [guid]::NewGuid().ToString("N"))
 
-New-Item -ItemType Directory -Path $scratchRoot | Out-Null
-Copy-Item -LiteralPath (Join-Path $fixtureRoot "project.godot") -Destination $scratchRoot
-Copy-Item -LiteralPath (Join-Path $fixtureRoot "fresh_base.gd") -Destination $scratchRoot
-Copy-Item -LiteralPath (Join-Path $fixtureRoot "runner.gd") -Destination $scratchRoot
-
 try {
+	New-Item -ItemType Directory -Path $scratchRoot | Out-Null
+	Copy-Item -LiteralPath (Join-Path $fixtureRoot "project.godot") -Destination $scratchRoot
+	Copy-Item -LiteralPath (Join-Path $fixtureRoot "fresh_base.gd") -Destination $scratchRoot
+	Copy-Item -LiteralPath (Join-Path $fixtureRoot "runner.gd") -Destination $scratchRoot
+
 	$cachePath = Join-Path $scratchRoot ".godot\global_script_class_cache.cfg"
 	if (Test-Path -LiteralPath $cachePath) {
 		throw "Fresh fixture unexpectedly contains a Godot class cache."
 	}
 
-	& pwsh -NoProfile -File (Join-Path $repoRoot "tools\run_godot.ps1") --headless --path $scratchRoot --script res://runner.gd
+	Push-Location $scratchRoot
+	try {
+		& pwsh -NoProfile -File (Join-Path $repoRoot "tools\run_godot.ps1") --headless --script res://runner.gd -- --editor --path not-an-engine-project
+	}
+	finally {
+		Pop-Location
+	}
 	if ($LASTEXITCODE -ne 0) {
-		throw "The project-local wrapper must bootstrap a fresh project's global script classes before running scripts."
+		throw "Script arguments after -- must not suppress or redirect the wrapper's fresh-project class bootstrap."
 	}
 
 	if (-not (Test-Path -LiteralPath $cachePath)) {
@@ -32,7 +38,8 @@ finally {
 	$resolvedScratch = [System.IO.Path]::GetFullPath($scratchRoot)
 	$resolvedTemp = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
 	if ($resolvedScratch.StartsWith($resolvedTemp, [System.StringComparison]::OrdinalIgnoreCase) -and
-		(Split-Path -Leaf $resolvedScratch).StartsWith("project-a-clean-wrapper-")) {
+		(Split-Path -Leaf $resolvedScratch).StartsWith("project-a-clean-wrapper-") -and
+		(Test-Path -LiteralPath $resolvedScratch)) {
 		[System.IO.Directory]::Delete($resolvedScratch, $true)
 	}
 }

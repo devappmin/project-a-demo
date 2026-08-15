@@ -9,10 +9,17 @@ if ([string]::IsNullOrWhiteSpace($projectAGodotExe) -or -not (Test-Path -Literal
 	throw "Set PROJECT_A_GODOT_BIN to the absolute Godot 4.7 executable path."
 }
 
+$engineArgs = @()
+foreach ($argument in $GodotArgs) {
+	if ($argument -eq "--") {
+		break
+	}
+	$engineArgs += $argument
+}
 $projectPath = (Get-Location).Path
-for ($index = 0; $index -lt $GodotArgs.Count - 1; $index++) {
-	if ($GodotArgs[$index] -eq "--path") {
-		$projectPath = $GodotArgs[$index + 1]
+for ($index = 0; $index -lt $engineArgs.Count - 1; $index++) {
+	if ($engineArgs[$index] -eq "--path") {
+		$projectPath = $engineArgs[$index + 1]
 		break
 	}
 }
@@ -26,7 +33,7 @@ $needsClassScan = -not (Test-Path -LiteralPath $classCache)
 if (-not $needsClassScan) {
 	$needsClassScan = (Get-Content -LiteralPath $classCache -Raw).Trim() -eq "list=[]"
 }
-if ((Test-Path -LiteralPath $projectFile) -and $needsClassScan -and $GodotArgs -notcontains "--editor") {
+if ((Test-Path -LiteralPath $projectFile) -and $needsClassScan -and $engineArgs -notcontains "--editor") {
 	& $projectAGodotExe --headless --path $projectPath --editor --quit
 	if ($LASTEXITCODE -ne 0) {
 		exit $LASTEXITCODE
