@@ -121,7 +121,11 @@ radius = 40.0
 [node name="Player" type="CharacterBody2D"]
 script = ExtResource("1_controller")
 
-[node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="."]
+[node name="PlayerVisual" type="Node2D" parent="."]
+position = Vector2(0, 17)
+
+[node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="PlayerVisual"]
+position = Vector2(0, -17)
 sprite_frames = SubResource("SpriteFrames_player")
 animation = &"idle_down"
 

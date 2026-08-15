@@ -14,7 +14,9 @@ prompt = "거울 조사하기 [E]"
 payload = {"text": "낯선 거울이다."}
 
 [node name="Sprite2D" type="Sprite2D" parent="."]
+position = Vector2(0, -22)
 texture = ExtResource("2_mirror")
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+position = Vector2(0, -22)
 shape = SubResource("RectangleShape_mirror")

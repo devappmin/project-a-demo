@@ -5,13 +5,20 @@ const PlayerInput = preload("res://game/actors/player/player_input.gd")
 
 @export var walk_speed := 48.0
 @export var sprint_speed := 72.0
+@export var presentation_parent_path: NodePath
 
 var facing := Vector2.DOWN
 
-@onready var animated_sprite: AnimatedSprite2D = $AnimatedSprite2D
+@onready var presentation: Node2D = $PlayerVisual
+@onready var animated_sprite: AnimatedSprite2D = $PlayerVisual/AnimatedSprite2D
 
 func _ready() -> void:
+	_attach_presentation()
+	_sync_presentation()
 	_update_animation(false)
+
+func _process(_delta: float) -> void:
+	_sync_presentation()
 
 func _physics_process(_delta: float) -> void:
 	var direction := PlayerInput.movement_direction()
@@ -43,3 +50,15 @@ func _facing_name() -> String:
 	if facing == Vector2.UP:
 		return "up"
 	return "down"
+
+func _attach_presentation() -> void:
+	if presentation_parent_path.is_empty():
+		return
+	var presentation_parent := get_node_or_null(presentation_parent_path) as Node2D
+	if presentation_parent == null:
+		return
+	presentation.reparent(presentation_parent)
+
+func _sync_presentation() -> void:
+	if presentation != null and presentation.get_parent() != self:
+		presentation.global_position = global_position + Vector2(0.0, 17.0)

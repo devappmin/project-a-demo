@@ -61,41 +61,51 @@ stretch_mode = 1
 [node name="start" type="Marker2D" parent="EntryPoints"]
 position = Vector2(160, 112)
 
-[node name="PropLayer" type="Node2D" parent="."]
+[node name="VisualSort" type="Node2D" parent="."]
+y_sort_enabled = true
 
-[node name="Bed" type="Sprite2D" parent="PropLayer"]
-position = Vector2(48, 55)
+[node name="Bed" type="Node2D" parent="VisualSort"]
+position = Vector2(48, 79)
+
+[node name="Sprite2D" type="Sprite2D" parent="VisualSort/Bed"]
+position = Vector2(0, -24)
 texture = ExtResource("6_bed")
 
-[node name="Bookshelf" type="Sprite2D" parent="PropLayer"]
-position = Vector2(272, 51)
+[node name="Bookshelf" type="Node2D" parent="VisualSort"]
+position = Vector2(272, 71)
+
+[node name="Sprite2D" type="Sprite2D" parent="VisualSort/Bookshelf"]
+position = Vector2(0, -20)
 texture = ExtResource("7_bookshelf")
 
-[node name="Desk" type="Sprite2D" parent="PropLayer"]
-position = Vector2(250, 130)
+[node name="Desk" type="Node2D" parent="VisualSort"]
+position = Vector2(250, 144)
+
+[node name="Sprite2D" type="Sprite2D" parent="VisualSort/Desk"]
+position = Vector2(0, -14)
 texture = ExtResource("8_desk")
 
-[node name="SampleInspectable" parent="PropLayer" instance=ExtResource("5_mirror")]
-position = Vector2(160, 54)
+[node name="SampleInspectable" parent="VisualSort" instance=ExtResource("5_mirror")]
+position = Vector2(160, 76)
 
-[node name="PropCollisions" type="Node2D" parent="PropLayer"]
+[node name="PropCollisions" type="Node2D" parent="."]
 
-[node name="Bed" type="StaticBody2D" parent="PropLayer/PropCollisions"]
+[node name="Bed" type="StaticBody2D" parent="PropCollisions"]
 position = Vector2(48, 70)
 
-[node name="CollisionShape2D" type="CollisionShape2D" parent="PropLayer/PropCollisions/Bed"]
+[node name="CollisionShape2D" type="CollisionShape2D" parent="PropCollisions/Bed"]
 shape = SubResource("RectangleShape_bed")
 
-[node name="Bookshelf" type="StaticBody2D" parent="PropLayer/PropCollisions"]
+[node name="Bookshelf" type="StaticBody2D" parent="PropCollisions"]
 position = Vector2(272, 65)
 
-[node name="CollisionShape2D" type="CollisionShape2D" parent="PropLayer/PropCollisions/Bookshelf"]
+[node name="CollisionShape2D" type="CollisionShape2D" parent="PropCollisions/Bookshelf"]
 shape = SubResource("RectangleShape_bookshelf")
 
-[node name="Desk" type="StaticBody2D" parent="PropLayer/PropCollisions"]
+[node name="Desk" type="StaticBody2D" parent="PropCollisions"]
 position = Vector2(250, 137)
 
-[node name="CollisionShape2D" type="CollisionShape2D" parent="PropLayer/PropCollisions/Desk"]
+[node name="CollisionShape2D" type="CollisionShape2D" parent="PropCollisions/Desk"]
 shape = SubResource("RectangleShape_desk")
 
 [node name="Boundaries" type="Node2D" parent="."]
@@ -126,3 +136,4 @@ shape = SubResource("RectangleShape_vertical")
 
 [node name="Player" parent="." instance=ExtResource("4_player")]
 position = Vector2(160, 112)
+presentation_parent_path = NodePath("../VisualSort")

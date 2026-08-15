@@ -7,6 +7,7 @@ func run() -> void:
 	_test_target_payload_is_immutable()
 	_test_router_honors_current_target_and_session_permission()
 	_test_foundation_room_contract()
+	await _test_foundation_room_y_sort_contract()
 	await _test_scene_detector_query()
 	await _test_edge_triggered_input_and_prompt_updates()
 
@@ -112,14 +113,14 @@ func _test_foundation_room_contract() -> void:
 	assert_eq(room.map_id, &"foundation_room", "foundation room has a stable map ID")
 	assert_not_null(room.get_node_or_null("EntryPoints/start"), "foundation room exposes the start entry point")
 	assert_not_null(room.get_node_or_null("TileLayer"), "foundation room has a visible tile layer")
-	assert_not_null(room.get_node_or_null("PropLayer"), "foundation room has a prop layer")
+	assert_not_null(room.get_node_or_null("VisualSort"), "foundation room has a visual sort layer")
 	assert_not_null(room.get_node_or_null("Boundaries"), "foundation room has collision boundaries")
 	var player := room.get_node_or_null("Player")
 	assert_not_null(player, "foundation room contains the player")
 	if player != null:
 		assert_not_null(player.get_node_or_null("InteractionDetector/CollisionShape2D"), "player detector has a query shape")
 		assert_not_null(player.get_node_or_null("InteractionRouter"), "player has an interaction router")
-	var mirror := room.get_node_or_null("PropLayer/SampleInspectable") as InteractionTarget
+	var mirror := room.get_node_or_null("VisualSort/SampleInspectable") as InteractionTarget
 	assert_not_null(mirror, "foundation room contains the sample inspectable")
 	if mirror != null:
 		assert_eq(mirror.get_interaction().payload, {"text": "낯선 거울이다."}, "sample inspectable exposes the required payload")
@@ -131,6 +132,46 @@ func _test_foundation_room_contract() -> void:
 	assert_not_null(app_root.get_node_or_null("UILayer/InteractionPrompt"), "AppRoot keeps the interaction prompt under the UI layer")
 	app_root.free()
 
+func _test_foundation_room_y_sort_contract() -> void:
+	var room_scene := load("res://content/maps/foundation_room.tscn") as PackedScene
+	var room := room_scene.instantiate()
+	add_child(room)
+	await get_tree().process_frame
+	var visual_sort := room.get_node_or_null("VisualSort") as Node2D
+	assert_not_null(visual_sort, "foundation room exposes a common visual sort parent")
+	if visual_sort == null:
+		room.queue_free()
+		await get_tree().process_frame
+		return
+	assert_true(visual_sort.y_sort_enabled, "foundation room enables feet-based Y-sort on the common visual parent")
+	var player := room.get_node("Player") as PlayerController
+	var player_visual := visual_sort.get_node_or_null("PlayerVisual") as Node2D
+	var bed := visual_sort.get_node_or_null("Bed") as Node2D
+	var bookshelf := visual_sort.get_node_or_null("Bookshelf") as Node2D
+	var desk := visual_sort.get_node_or_null("Desk") as Node2D
+	var mirror := visual_sort.get_node_or_null("SampleInspectable") as InteractionTarget
+	assert_not_null(player_visual, "player presentation joins the common visual sort parent")
+	assert_not_null(bed, "bed presentation joins the common visual sort parent")
+	assert_not_null(bookshelf, "bookshelf presentation joins the common visual sort parent")
+	assert_not_null(desk, "desk presentation joins the common visual sort parent")
+	assert_not_null(mirror, "inspectable presentation joins the common visual sort parent")
+	if player_visual != null and bed != null and bookshelf != null and desk != null and mirror != null:
+		assert_eq(player_visual.get_node("AnimatedSprite2D").position, Vector2(0, -17), "player sort node is anchored at its feet")
+		assert_eq(bed.get_node("Sprite2D").position, Vector2(0, -24), "bed sort node is anchored at its ground base")
+		assert_eq(bookshelf.get_node("Sprite2D").position, Vector2(0, -20), "bookshelf sort node is anchored at its ground base")
+		assert_eq(desk.get_node("Sprite2D").position, Vector2(0, -14), "desk sort node is anchored at its ground base")
+		assert_eq(mirror.get_node("Sprite2D").position, Vector2(0, -22), "inspectable sort node is anchored at its ground base")
+		player.position = Vector2(desk.global_position.x, desk.global_position.y - 40.0)
+		await get_tree().process_frame
+		assert_true(player_visual.global_position.y < desk.global_position.y, "player sorts behind a prop when its feet are above the prop base")
+		player.position = Vector2(desk.global_position.x, desk.global_position.y + 40.0)
+		await get_tree().process_frame
+		assert_true(player_visual.global_position.y > desk.global_position.y, "player sorts in front of a prop when its feet are below the prop base")
+	assert_not_null(room.get_node_or_null("PropCollisions/Bed"), "physical prop collision stays outside the visual sort hierarchy")
+	assert_eq(player.get_node("CollisionShape2D").get_parent(), player, "player collision stays with the nonvisual physics body")
+	room.queue_free()
+	await get_tree().process_frame
+
 func _test_scene_detector_query() -> void:
 	var app_scene := load("res://app/bootstrap/app_root.tscn") as PackedScene
 	var app_root := app_scene.instantiate()
@@ -139,7 +180,7 @@ func _test_scene_detector_query() -> void:
 	var player := room.get_node("Player") as PlayerController
 	var detector := player.get_node("InteractionDetector") as InteractionDetector
 	var camera := player.get_node("Camera2D") as Camera2D
-	var mirror := room.get_node("PropLayer/SampleInspectable") as InteractionTarget
+	var mirror := room.get_node("VisualSort/SampleInspectable") as InteractionTarget
 	var prompt := app_root.get_node("UILayer/InteractionPrompt") as InteractionPrompt
 	assert_eq(camera.limit_left, 0, "foundation room clamps the camera to its left edge")
 	assert_eq(camera.limit_top, 0, "foundation room clamps the camera to its top edge")
@@ -147,6 +188,7 @@ func _test_scene_detector_query() -> void:
 	assert_eq(camera.limit_bottom, 192, "foundation room includes twelve 16-pixel rows and clamps the camera to its bottom edge")
 	player.position = mirror.position - Vector2(32, 0)
 	player.facing = Vector2.RIGHT
+	await get_tree().physics_frame
 	await get_tree().physics_frame
 	await get_tree().physics_frame
 	assert_eq(detector.current_target, mirror, "the player detector discovers a target inside its query shape and facing cone")
@@ -179,9 +221,15 @@ func _test_edge_triggered_input_and_prompt_updates() -> void:
 
 	var target := InteractionTarget.new()
 	target.prompt = "거울 조사하기 [E]"
+	GameSession.change_mode(GameMode.Value.EXPLORATION)
 	detector.current_target = target
 	assert_true(prompt.visible, "prompt becomes visible when the detector acquires a target")
 	assert_eq(prompt.get_node("PanelContainer/PromptLabel").text, "거울 조사하기 [E]", "prompt shows the current target text")
+	GameSession.change_mode(GameMode.Value.DIALOGUE)
+	assert_false(prompt.visible, "prompt hides immediately when dialogue blocks interaction")
+	assert_eq(detector.current_target, target, "mode changes do not discard the selected interaction target")
+	GameSession.change_mode(GameMode.Value.EXPLORATION)
+	assert_true(prompt.visible, "prompt reappears when exploration restores interaction permission")
 
 	var requested: Array[Dictionary] = []
 	router.action_requested.connect(func(_kind: StringName, _payload: Dictionary) -> void:
