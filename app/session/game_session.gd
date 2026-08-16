@@ -31,6 +31,7 @@ var narrative_state: NarrativeStateResource = NarrativeStateResource.new()
 var world_state: WorldStateResource = WorldStateResource.new()
 var play_time_seconds := 0.0
 var _initialized := false
+var _menu_origin_mode := -1
 
 func _ready() -> void:
 	initialize()
@@ -47,8 +48,25 @@ func change_mode(next_mode: int) -> bool:
 		mode_change_rejected.emit(previous, next_mode)
 		return false
 	current_mode = next_mode
+	if next_mode == GameMode.Value.MENU:
+		if previous != GameMode.Value.TRANSITION:
+			_menu_origin_mode = -1
+	elif next_mode != GameMode.Value.TRANSITION:
+		_menu_origin_mode = -1
 	mode_changed.emit(previous, current_mode)
 	return true
+
+func enter_menu() -> bool:
+	if current_mode != GameMode.Value.EXPLORATION:
+		return false
+	var origin := current_mode
+	if not change_mode(GameMode.Value.MENU):
+		return false
+	_menu_origin_mode = origin
+	return true
+
+func is_menu_from_exploration() -> bool:
+	return current_mode == GameMode.Value.MENU and _menu_origin_mode == GameMode.Value.EXPLORATION
 
 func can(action: StringName) -> bool:
 	return action in _permissions[current_mode]
@@ -57,6 +75,7 @@ func reset_new_game() -> void:
 	narrative_state = NarrativeStateResource.new()
 	world_state = WorldStateResource.new()
 	play_time_seconds = 0.0
+	_menu_origin_mode = -1
 
 func snapshot_session() -> Dictionary:
 	return {

@@ -19,6 +19,7 @@ run/main_scene="res://app/bootstrap/app_root.tscn"
 
 GameSession="*res://app/session/game_session.gd"
 SceneDirector="*res://app/scene_flow/scene_director.gd"
+SaveService="*res://app/save/save_service.gd"
 
 [input]
 

@@ -10,11 +10,14 @@ const GameMode = preload("res://app/session/game_mode.gd")
 @onready var dialogue_adapter: DialogueActionAdapter = $ServiceLayer/DialogueActionAdapter
 @onready var door_adapter: DoorActionAdapter = $ServiceLayer/DoorActionAdapter
 @onready var screen_fade: ScreenFade = $UILayer/ScreenFade
+@onready var dialogue_service: DialogueService = $ServiceLayer/DialogueService
 
 func _ready() -> void:
 	if SceneDirector.configure(world_host as Node2D, screen_fade) != OK:
 		return
 	SceneDirector.set_map_rebinder(_rebind_player)
+	if SaveService.configure(SceneDirector, dialogue_service) != OK:
+		return
 	GameSession.change_mode(GameMode.Value.MENU)
 
 func _rebind_player(player: PlayerController) -> Error:

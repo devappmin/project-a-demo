@@ -21,6 +21,15 @@ func run() -> void:
 	var initial_commit: Array[StringName] = [&"foundation_room"]
 	var room_and_hall_commits: Array[StringName] = [&"foundation_room", &"foundation_hall"]
 	director.map_committed.connect(func(map_id: StringName, _spawn_id: StringName, _player: PlayerController) -> void: committed_maps.append(map_id))
+	var title_restore_plan: Dictionary = director.prepare_restore(&"foundation_room", &"start")
+	title_restore_plan["defer_finalize"] = true
+	assert_eq(await director.commit_restore(title_restore_plan), OK, "title restore can stage its first candidate transactionally")
+	assert_eq(await director.rollback_restore(), OK, "failed title restore can roll back to an empty world")
+	await get_tree().process_frame
+	assert_eq(host.get_child_count(), 0, "title restore rollback leaves WorldHost empty")
+	assert_false(is_instance_valid(director.player), "title restore rollback retains no candidate player")
+	assert_eq(GameSession.current_mode, GameModeResource.Value.MENU, "title restore rollback returns to title menu mode")
+	committed_maps.clear()
 	assert_eq(await director.start_new_game(&"foundation_room", &"start"), OK, "new game commits its first validated map")
 	assert_eq(committed_maps, initial_commit, "initial placement publishes one committed map")
 	var first_map := host.get_child(0) as MapScene
@@ -102,6 +111,43 @@ func run() -> void:
 		assert_eq(player.presentation.get_parent(), returned_room.get_visual_root(), "persistent visual follows player feet after round trip")
 	assert_eq(checkpoints[0], 2, "normal transitions emit one stable map checkpoint after placement")
 	assert_eq(director.player, player, "both transitions retain the exact same player instance")
+	var invalid_world_plan: Dictionary = director.prepare_restore(&"foundation_hall", &"start")
+	invalid_world_plan["world"] = {}
+	var map_before_invalid_world := host.get_child(0)
+	var mode_before_invalid_world := GameSession.current_mode
+	assert_eq(await director.commit_restore(invalid_world_plan), ERR_INVALID_DATA, "invalid restore world is rejected before transition mutation")
+	assert_eq(host.get_child(0), map_before_invalid_world, "invalid restore world preserves the active map")
+	assert_eq(GameSession.current_mode, mode_before_invalid_world, "invalid restore world preserves the current mode")
+	assert_true(director.has_method("has_pending_restore"), "SceneDirector exposes pending restore state")
+	assert_true(director.has_method("rollback_restore"), "SceneDirector exposes exact restore rollback")
+	assert_true(director.has_method("finalize_restore"), "SceneDirector exposes explicit restore finalization")
+	if not director.has_method("has_pending_restore") or not director.has_method("rollback_restore") or not director.has_method("finalize_restore"):
+		await _cleanup_harness(harness)
+		return
+	var restore_plan: Dictionary = director.prepare_restore(&"foundation_hall", &"start")
+	restore_plan["defer_finalize"] = true
+	var map_before_deferred_restore := host.get_child(0) as MapScene
+	var position_before_deferred_restore := player.global_position
+	var facing_before_deferred_restore := player.facing
+	assert_eq(await director.commit_restore(restore_plan), OK, "deferred restore commits a candidate without destroying rollback state")
+	assert_true(director.has_pending_restore(), "deferred restore keeps an explicit pending transaction")
+	assert_true(is_instance_valid(map_before_deferred_restore), "deferred restore keeps the old map alive")
+	player.facing = Vector2.RIGHT if facing_before_deferred_restore != Vector2.RIGHT else Vector2.LEFT
+	assert_eq(director.rollback_restore(), OK, "deferred restore can roll back exactly")
+	await get_tree().process_frame
+	assert_eq(host.get_child(0), map_before_deferred_restore, "rollback reattaches the exact old map instance")
+	assert_eq(player.global_position, position_before_deferred_restore, "rollback restores the exact player position")
+	assert_eq(player.facing, facing_before_deferred_restore, "rollback restores the exact player facing")
+	assert_eq(director.capture_save_context().get("spawn_id"), &"from_hall", "rollback restores the old stable spawn ID")
+	assert_false(director.has_pending_restore(), "rollback closes the pending restore transaction")
+	var finalize_plan: Dictionary = director.prepare_restore(&"foundation_hall", &"start")
+	finalize_plan["defer_finalize"] = true
+	var old_map_for_finalize := host.get_child(0) as MapScene
+	assert_eq(await director.commit_restore(finalize_plan), OK, "a second deferred restore can commit")
+	assert_eq(await director.finalize_restore(), OK, "successful restore finalizes explicitly")
+	await get_tree().process_frame
+	assert_false(is_instance_valid(old_map_for_finalize), "finalize frees the retained old map only after restore success")
+	assert_false(director.has_pending_restore(), "finalize closes the pending restore transaction")
 	assert_true(director.has_method("set_transition_hook"), "SceneDirector exposes a reentry seam that runs after the transition lock")
 	if director.has_method("set_transition_hook") and returned_room != null:
 		assert_eq(returned_room.capture_world_objects(GameSession.world_state), OK, "reentry baseline captures the current world state")
