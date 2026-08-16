@@ -1,4 +1,4 @@
-[gd_scene load_steps=8 format=3]
+[gd_scene load_steps=13 format=3]
 
 [ext_resource type="Script" path="res://app/bootstrap/app_root.gd" id="1_app_root"]
 [ext_resource type="PackedScene" path="res://ui/hud/interaction_prompt.tscn" id="3_prompt"]
@@ -7,6 +7,11 @@
 [ext_resource type="Script" path="res://game/interaction/dialogue_action_adapter.gd" id="6_dialogue_adapter"]
 [ext_resource type="Script" path="res://game/interaction/door_action_adapter.gd" id="7_door_adapter"]
 [ext_resource type="PackedScene" path="res://ui/transitions/screen_fade.tscn" id="8_fade"]
+[ext_resource type="PackedScene" path="res://ui/menus/title_menu.tscn" id="9_title"]
+[ext_resource type="PackedScene" path="res://ui/menus/pause_menu.tscn" id="10_pause"]
+[ext_resource type="PackedScene" path="res://ui/menus/save_slot_menu.tscn" id="11_slots"]
+[ext_resource type="PackedScene" path="res://ui/menus/confirm_panel.tscn" id="12_confirm"]
+[ext_resource type="PackedScene" path="res://ui/hud/toast_layer.tscn" id="13_toast"]
 
 [node name="AppRoot" type="Node"]
 script = ExtResource("1_app_root")
@@ -32,6 +37,16 @@ script = ExtResource("7_door_adapter")
 [node name="ScreenFade" parent="UILayer" instance=ExtResource("8_fade")]
 
 [node name="DialogueView" parent="UILayer" instance=ExtResource("5_dialogue_view")]
+
+[node name="TitleMenu" parent="UILayer" instance=ExtResource("9_title")]
+
+[node name="PauseMenu" parent="UILayer" instance=ExtResource("10_pause")]
+
+[node name="SlotMenu" parent="UILayer" instance=ExtResource("11_slots")]
+
+[node name="ConfirmPanel" parent="UILayer" instance=ExtResource("12_confirm")]
+
+[node name="ToastLayer" parent="UILayer" instance=ExtResource("13_toast")]
 
 [connection signal="line_requested" from="ServiceLayer/DialogueService" to="UILayer/DialogueView" method="show_line"]
 [connection signal="choices_requested" from="ServiceLayer/DialogueService" to="UILayer/DialogueView" method="show_choices"]
