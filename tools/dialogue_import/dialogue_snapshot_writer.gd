@@ -2,7 +2,7 @@
 extends RefCounted
 class_name DialogueSnapshotWriter
 
-const Compiler = preload("res://tools/notion_sync/dialogue_compiler.gd")
+const Compiler = preload("res://tools/dialogue_import/document_dialogue_compiler.gd")
 const ERR_ROLLBACK_FAILED := ERR_CANT_RESOLVE
 
 var last_recovery: Dictionary = {}
@@ -12,6 +12,13 @@ func _init(transaction_observer: Callable = Callable()) -> void:
 	_transaction_observer = transaction_observer
 
 func replace_snapshot(output_dir: String, graphs: Dictionary, manifest: Dictionary) -> Error:
+	var artifacts := {}
+	for scene_key_value: Variant in graphs:
+		var scene_key := String(scene_key_value)
+		artifacts[scene_key.replace(".", "_") + ".json"] = graphs[scene_key_value]
+	return replace_artifacts(output_dir, artifacts, manifest)
+
+func replace_artifacts(output_dir: String, artifacts: Dictionary, manifest: Dictionary) -> Error:
 	last_recovery = {}
 	var normalized_output := output_dir.simplify_path()
 	if not _is_safe_output_directory(normalized_output):
@@ -25,7 +32,7 @@ func replace_snapshot(output_dir: String, graphs: Dictionary, manifest: Dictiona
 	var cleanup_error := _remove_tree(paths["temporary"])
 	if cleanup_error != OK:
 		return cleanup_error
-	var contents_result := _snapshot_contents(graphs, manifest)
+	var contents_result := _artifact_contents(artifacts, manifest)
 	if not contents_result["ok"]:
 		return contents_result["error"]
 	var contents: Dictionary = contents_result["contents"]
@@ -86,30 +93,31 @@ func replace_snapshot(output_dir: String, graphs: Dictionary, manifest: Dictiona
 			return OK
 	return OK
 
-func _snapshot_contents(graphs: Dictionary, manifest: Dictionary) -> Dictionary:
-	if graphs.is_empty():
+func _artifact_contents(artifacts: Dictionary, manifest: Dictionary) -> Dictionary:
+	if artifacts.is_empty():
 		return {"ok":false, "error":ERR_INVALID_DATA, "contents":{}}
 	if int(manifest.get("schema_version", 0)) != 1 or typeof(manifest.get("files")) != TYPE_DICTIONARY:
 		return {"ok":false, "error":ERR_INVALID_DATA, "contents":{}}
 	var contents := {}
 	var filename_identities := {}
 	var expected_hashes: Dictionary = manifest["files"]
-	for scene_key: String in _sorted_keys(graphs):
-		if not Compiler.is_safe_scene_key(scene_key):
+	for filename_value: Variant in artifacts:
+		if typeof(filename_value) != TYPE_STRING:
 			return {"ok":false, "error":ERR_INVALID_PARAMETER, "contents":{}}
-		var filename := Compiler.scene_filename(scene_key)
+		var filename := String(filename_value)
+		if not _is_safe_artifact_filename(filename):
+			return {"ok":false, "error":ERR_INVALID_PARAMETER, "contents":{}}
 		var filename_identity := filename.to_lower()
 		if filename_identities.has(filename_identity):
 			return {"ok":false, "error":ERR_ALREADY_EXISTS, "contents":{}}
 		filename_identities[filename_identity] = true
-	for scene_key: String in _sorted_keys(graphs):
-		if typeof(graphs[scene_key]) != TYPE_DICTIONARY:
+	for filename: String in _sorted_keys(artifacts):
+		if typeof(artifacts[filename]) != TYPE_DICTIONARY:
 			return {"ok":false, "error":ERR_INVALID_DATA, "contents":{}}
-		var filename := Compiler.scene_filename(scene_key)
-		var graph_json := Compiler.stable_json(graphs[scene_key])
-		if String(expected_hashes.get(filename, "")) != graph_json.sha256_text():
+		var artifact_json := Compiler.stable_json(artifacts[filename])
+		if String(expected_hashes.get(filename, "")) != artifact_json.sha256_text():
 			return {"ok":false, "error":ERR_FILE_CORRUPT, "contents":{}}
-		contents[filename] = graph_json
+		contents[filename] = artifact_json
 	if expected_hashes.size() != contents.size():
 		return {"ok":false, "error":ERR_INVALID_DATA, "contents":{}}
 	contents["manifest.json"] = Compiler.stable_json(manifest)
@@ -257,6 +265,21 @@ func _is_safe_output_directory(path: String) -> bool:
 	if absolute.is_empty() or absolute.get_base_dir() == absolute:
 		return false
 	return path.begins_with("res://") or path.begins_with("user://") or path.is_absolute_path()
+
+func _is_safe_artifact_filename(filename: String) -> bool:
+	if filename.is_empty() or filename != filename.get_file() or not filename.ends_with(".json"):
+		return false
+	var base_name := filename.trim_suffix(".json")
+	if base_name.is_empty() or base_name.to_lower() == "manifest":
+		return false
+	if base_name.to_upper() in ["CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"]:
+		return false
+	for index: int in filename.length():
+		var code := filename.unicode_at(index)
+		var safe := code >= 97 and code <= 122 or code >= 65 and code <= 90 or code >= 48 and code <= 57 or code in [45, 46, 95]
+		if not safe:
+			return false
+	return true
 
 func _sorted_keys(dictionary: Dictionary) -> Array[String]:
 	var keys: Array[String] = []

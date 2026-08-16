@@ -1,6 +1,6 @@
 extends "res://tests/support/test_case.gd"
 
-const WRITER_PATH := "res://tools/notion_sync/dialogue_snapshot_writer.gd"
+const WRITER_PATH := "res://tools/dialogue_import/dialogue_snapshot_writer.gd"
 
 var _scenario := ""
 var _test_root := ""
@@ -22,14 +22,16 @@ func run() -> void:
 	_test_final_backup_retention_failure_preserves_verified_recovery(writer_script)
 	_test_actual_backup_cleanup_failure_is_committed(writer_script)
 	_test_empty_payload_fails_closed(writer_script)
-	_test_unsafe_scene_names_fail_closed(writer_script)
+	_test_unsafe_artifact_names_fail_closed(writer_script)
+	_test_manifest_mismatch_fails_closed(writer_script)
+	_test_legacy_snapshot_wrapper(writer_script)
 	_cleanup_exact_test_root()
 
 func _test_successful_atomic_replacement(writer_script: Variant) -> void:
 	var state := _setup_previous("success")
 	var writer: Variant = writer_script.new()
 	var payload := _payload()
-	var result: Error = writer.replace_snapshot(state["output"], payload["graphs"], payload["manifest"])
+	var result: Error = writer.replace_artifacts(state["output"], payload["artifacts"], payload["manifest"])
 	assert_eq(result, OK, "valid snapshot replaces the previous directory")
 	assert_eq(_snapshot_bytes(state["output"]), _payload_bytes(payload), "successful replacement publishes exact verified bytes")
 	assert_eq(_snapshot_bytes(state["backup"]), {}, "successful replacement removes the backup sibling")
@@ -40,7 +42,7 @@ func _test_actual_partial_write_failure(writer_script: Variant) -> void:
 	_scenario = "partial_write"
 	var writer: Variant = writer_script.new(Callable(self, "_transaction_observer"))
 	var payload := _payload()
-	var result: Error = writer.replace_snapshot(state["output"], payload["graphs"], payload["manifest"])
+	var result: Error = writer.replace_artifacts(state["output"], payload["artifacts"], payload["manifest"])
 	_scenario = ""
 	assert_true(result != OK, "actual manifest-file open failure is returned")
 	assert_eq(_snapshot_bytes(state["output"]), state["before"], "partial write failure preserves current bytes")
@@ -52,7 +54,7 @@ func _test_actual_corrupt_reread_failure(writer_script: Variant) -> void:
 	_scenario = "corrupt_reread"
 	var writer: Variant = writer_script.new(Callable(self, "_transaction_observer"))
 	var payload := _payload()
-	var result: Error = writer.replace_snapshot(state["output"], payload["graphs"], payload["manifest"])
+	var result: Error = writer.replace_artifacts(state["output"], payload["artifacts"], payload["manifest"])
 	_scenario = ""
 	assert_eq(result, ERR_FILE_CORRUPT, "actual on-disk corruption is detected during reread hashing")
 	assert_eq(_snapshot_bytes(state["output"]), state["before"], "verification failure preserves current bytes")
@@ -64,7 +66,7 @@ func _test_actual_backup_rename_failure(writer_script: Variant) -> void:
 	_scenario = "backup_rename"
 	var writer: Variant = writer_script.new(Callable(self, "_transaction_observer"))
 	var payload := _payload()
-	var result: Error = writer.replace_snapshot(state["output"], payload["graphs"], payload["manifest"])
+	var result: Error = writer.replace_artifacts(state["output"], payload["artifacts"], payload["manifest"])
 	_scenario = ""
 	assert_true(result != OK, "actual current-to-backup rename failure is returned")
 	assert_eq(_snapshot_bytes(state["output"]), state["before"], "backup rename failure preserves current bytes")
@@ -76,7 +78,7 @@ func _test_actual_publish_failure_rolls_back_by_rename(writer_script: Variant) -
 	_scenario = "publish_then_fail"
 	var writer: Variant = writer_script.new(Callable(self, "_transaction_observer"))
 	var payload := _payload()
-	var result: Error = writer.replace_snapshot(state["output"], payload["graphs"], payload["manifest"])
+	var result: Error = writer.replace_artifacts(state["output"], payload["artifacts"], payload["manifest"])
 	_scenario = ""
 	assert_true(result != OK, "actual missing-temp publish primitive failure is returned after rollback")
 	assert_eq(_snapshot_bytes(state["output"]), state["before"], "rename rollback restores exact old current bytes")
@@ -88,7 +90,7 @@ func _test_actual_rollback_failure_preserves_backup(writer_script: Variant) -> v
 	_scenario = "rollback_obstruction"
 	var writer: Variant = writer_script.new(Callable(self, "_transaction_observer"))
 	var payload := _payload()
-	var result: Error = writer.replace_snapshot(state["output"], payload["graphs"], payload["manifest"])
+	var result: Error = writer.replace_artifacts(state["output"], payload["artifacts"], payload["manifest"])
 	_scenario = ""
 	assert_eq(result, ERR_CANT_RESOLVE, "rollback primitive failure returns the distinct recovery error")
 	assert_eq(_snapshot_bytes(state["output"]), {"obstruction.txt":"external obstruction".to_utf8_buffer()}, "rollback failure does not delete the current-path obstruction")
@@ -104,7 +106,7 @@ func _test_final_backup_retention_failure_preserves_verified_recovery(writer_scr
 	_observer_error = OK
 	var writer: Variant = writer_script.new(Callable(self, "_transaction_observer"))
 	var payload := _payload()
-	var result: Error = writer.replace_snapshot(state["output"], payload["graphs"], payload["manifest"])
+	var result: Error = writer.replace_artifacts(state["output"], payload["artifacts"], payload["manifest"])
 	_scenario = ""
 	assert_eq(_observer_error, OK, "actual unrelated backup obstruction is created after current restoration")
 	assert_eq(result, ERR_CANT_RESOLVE, "final recovery-to-backup rename failure returns the distinct rollback error")
@@ -128,7 +130,7 @@ func _test_actual_backup_cleanup_failure_is_committed(writer_script: Variant) ->
 	_observer_error = OK
 	var writer: Variant = writer_script.new(Callable(self, "_transaction_observer"))
 	var payload := _payload()
-	var result: Error = writer.replace_snapshot(state["output"], payload["graphs"], payload["manifest"])
+	var result: Error = writer.replace_artifacts(state["output"], payload["artifacts"], payload["manifest"])
 	_scenario = ""
 	assert_eq(_observer_error, OK, "cleanup failure fixture makes the actual backup file read-only")
 	assert_eq(result, OK, "a valid committed output is not reported as an import failure when backup cleanup fails")
@@ -140,7 +142,7 @@ func _test_actual_backup_cleanup_failure_is_committed(writer_script: Variant) ->
 	assert_true(typeof(recovery) == TYPE_DICTIONARY and recovery.get("code", "") == "backup_cleanup_residue", "cleanup failure names the artifact as residue, not a recovery backup")
 	assert_false(bool(recovery.get("recoverable", true)), "partial cleanup residue is never advertised as recoverable")
 	var retry_writer: Variant = writer_script.new()
-	assert_eq(retry_writer.replace_snapshot(state["output"], payload["graphs"], payload["manifest"]), ERR_ALREADY_EXISTS, "retained backup makes future replacement deterministic")
+	assert_eq(retry_writer.replace_artifacts(state["output"], payload["artifacts"], payload["manifest"]), ERR_ALREADY_EXISTS, "retained backup makes future replacement deterministic")
 	assert_eq(retry_writer.last_recovery.get("code", ""), "backup_artifact_present", "future replacement truthfully reports a generic blocking artifact")
 	assert_false(bool(retry_writer.last_recovery.get("recoverable", true)), "future process does not guess that a stale artifact is recoverable")
 	_set_tree_read_only(state["backup"], false)
@@ -149,24 +151,42 @@ func _test_empty_payload_fails_closed(writer_script: Variant) -> void:
 	var state := _setup_previous("empty-payload")
 	var writer: Variant = writer_script.new()
 	var manifest := {"schema_version":1, "generated_at":"2026-08-16T00:00:00Z", "sources":[], "files":{}, "scenes":[]}
-	var result: Error = writer.replace_snapshot(state["output"], {}, manifest)
+	var result: Error = writer.replace_artifacts(state["output"], {}, manifest)
 	assert_eq(result, ERR_INVALID_DATA, "writer rejects a manifest-only empty snapshot")
 	assert_eq(_snapshot_bytes(state["output"]), state["before"], "empty writer payload preserves the current snapshot byte-for-byte")
 	assert_eq(_snapshot_bytes(state["backup"]), {}, "empty writer payload creates no backup")
 	assert_eq(_snapshot_bytes(state["temporary"]), {}, "empty writer payload creates no temporary transaction")
 
-func _test_unsafe_scene_names_fail_closed(writer_script: Variant) -> void:
-	for scene_key: String in ["manifest", "CON", "bad:name"]:
-		var state := _setup_previous("unsafe-" + scene_key.replace(":", "_"))
+func _test_unsafe_artifact_names_fail_closed(writer_script: Variant) -> void:
+	for filename: String in ["manifest.json", "nested/graph.json", "bad:name.json", "graph.txt", "CON.json"]:
+		var state := _setup_previous("unsafe-" + filename.replace("/", "_").replace(":", "_"))
 		var writer: Variant = writer_script.new()
-		var payload := _payload_for_scenes([scene_key])
-		assert_eq(writer.replace_snapshot(state["output"], payload["graphs"], payload["manifest"]), ERR_INVALID_PARAMETER, "writer rejects unsafe scene key %s" % scene_key)
-		assert_eq(_snapshot_bytes(state["output"]), state["before"], "unsafe scene key %s preserves current bytes" % scene_key)
-		assert_eq(_snapshot_bytes(state["temporary"]), {}, "unsafe scene key %s creates no temporary sibling" % scene_key)
+		var payload := _payload_for_artifacts({filename:{"schema_version":1}})
+		assert_eq(writer.replace_artifacts(state["output"], payload["artifacts"], payload["manifest"]), ERR_INVALID_PARAMETER, "writer rejects unsafe artifact filename %s" % filename)
+		assert_eq(_snapshot_bytes(state["output"]), state["before"], "unsafe artifact filename %s preserves current bytes" % filename)
+		assert_eq(_snapshot_bytes(state["temporary"]), {}, "unsafe artifact filename %s creates no temporary sibling" % filename)
 	var collision_state := _setup_previous("writer-collision")
-	var collision_payload := _payload_for_scenes(["a.b", "a_b"])
-	assert_eq(writer_script.new().replace_snapshot(collision_state["output"], collision_payload["graphs"], collision_payload["manifest"]), ERR_ALREADY_EXISTS, "writer rejects cross-platform filename collisions")
+	var collision_payload := _payload_for_artifacts({"A.json":{"value":1}, "a.json":{"value":2}})
+	assert_eq(writer_script.new().replace_artifacts(collision_state["output"], collision_payload["artifacts"], collision_payload["manifest"]), ERR_ALREADY_EXISTS, "writer rejects case-insensitive filename collisions")
 	assert_eq(_snapshot_bytes(collision_state["output"]), collision_state["before"], "filename collision preserves current bytes")
+
+func _test_manifest_mismatch_fails_closed(writer_script: Variant) -> void:
+	var state := _setup_previous("manifest-mismatch")
+	var payload := _payload()
+	payload["manifest"]["files"]["events.json"] = "wrong-hash"
+	var writer: Variant = writer_script.new()
+	assert_eq(writer.replace_artifacts(state["output"], payload["artifacts"], payload["manifest"]), ERR_FILE_CORRUPT, "writer rejects a manifest hash that does not match stable artifact bytes")
+	assert_eq(_snapshot_bytes(state["output"]), state["before"], "manifest hash mismatch preserves the current snapshot byte-for-byte")
+	assert_eq(_snapshot_bytes(state["temporary"]), {}, "manifest hash mismatch creates no transaction residue")
+
+func _test_legacy_snapshot_wrapper(writer_script: Variant) -> void:
+	var state := _setup_previous("legacy-wrapper")
+	var graph := {"schema_version":1, "scene_key":"foundation.inspect", "entry_node":"end1", "nodes":{"end1":{"type":"end"}}}
+	var graph_json := JSON.stringify(graph, "\t", true, true)
+	var manifest := {"schema_version":1, "generated_at":"2026-08-16T00:00:00Z", "files":{"foundation_inspect.json":graph_json.sha256_text()}, "scenes":["foundation.inspect"]}
+	var writer: Variant = writer_script.new()
+	assert_eq(writer.replace_snapshot(state["output"], {"foundation.inspect":graph}, manifest), OK, "legacy graph wrapper remains source-compatible until migration removes the old CLI")
+	assert_eq(FileAccess.get_file_as_string(state["output"].path_join("foundation_inspect.json")), graph_json, "legacy wrapper publishes the same stable graph bytes")
 
 func _transaction_observer(stage: String, paths_value: Variant) -> void:
 	if typeof(paths_value) != TYPE_DICTIONARY:
@@ -210,25 +230,26 @@ func _setup_previous(label: String) -> Dictionary:
 	return {"output":output, "temporary":output + ".tmp", "backup":output + ".bak", "before":_snapshot_bytes(output)}
 
 func _payload() -> Dictionary:
-	return _payload_for_scenes(["foundation.inspect"])
+	return _payload_for_artifacts({
+		"foundation_inspect.json":{"schema_version":1, "scene_key":"foundation.inspect", "entry_node":"end1", "nodes":{"end1":{"type":"end"}}},
+		"events.json":{"schema_version":1, "bundles":{"foundation.inspect":{"triggers":{}}}},
+		"source_map.json":{"schema_version":1, "sources":[]},
+	})
 
-func _payload_for_scenes(scene_keys: Array) -> Dictionary:
-	var graphs := {}
+func _payload_for_artifacts(artifacts: Dictionary) -> Dictionary:
 	var files := {}
-	var sorted_scene_keys: Array = scene_keys.duplicate()
-	sorted_scene_keys.sort()
-	for scene_key_value: Variant in sorted_scene_keys:
-		var scene_key := String(scene_key_value)
-		var graph := {"schema_version":1, "scene_key":scene_key, "entry_node":"end1", "nodes":{"end1":{"type":"end"}}}
-		graphs[scene_key] = graph
-		files[scene_key.replace(".", "_") + ".json"] = JSON.stringify(graph, "\t", true, true).sha256_text()
-	return {"graphs":graphs, "manifest":{"schema_version":1, "generated_at":"2026-08-16T00:00:00Z", "sources":[], "files":files, "scenes":sorted_scene_keys}}
+	var filenames: Array = artifacts.keys()
+	filenames.sort()
+	for filename_value: Variant in filenames:
+		var filename := String(filename_value)
+		files[filename] = JSON.stringify(artifacts[filename], "\t", true, true).sha256_text()
+	return {"artifacts":artifacts, "manifest":{"schema_version":1, "generated_at":"2026-08-16T00:00:00Z", "bundles":["foundation.inspect"], "files":files}}
 
 func _payload_bytes(payload: Dictionary) -> Dictionary:
 	var result := {"manifest.json":JSON.stringify(payload["manifest"], "\t", true, true).to_utf8_buffer()}
-	for scene_key_value: Variant in payload["graphs"]:
-		var scene_key := String(scene_key_value)
-		result[scene_key.replace(".", "_") + ".json"] = JSON.stringify(payload["graphs"][scene_key], "\t", true, true).to_utf8_buffer()
+	for filename_value: Variant in payload["artifacts"]:
+		var filename := String(filename_value)
+		result[filename] = JSON.stringify(payload["artifacts"][filename], "\t", true, true).to_utf8_buffer()
 	return result
 
 func _write_raw(path: String, bytes: PackedByteArray) -> void:

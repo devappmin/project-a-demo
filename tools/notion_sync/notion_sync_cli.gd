@@ -6,7 +6,7 @@ const SyncConfig = preload("res://tools/notion_sync/notion_sync_config.gd")
 const Transport = preload("res://tools/notion_sync/notion_transport.gd")
 const Mapper = preload("res://tools/notion_sync/notion_mapper.gd")
 const Compiler = preload("res://tools/notion_sync/dialogue_compiler.gd")
-const SnapshotWriter = preload("res://tools/notion_sync/dialogue_snapshot_writer.gd")
+const SnapshotWriter = preload("res://tools/dialogue_import/dialogue_snapshot_writer.gd")
 const DEFAULT_OUTPUT_DIR := "res://data/generated/dialogues"
 
 func _initialize() -> void:

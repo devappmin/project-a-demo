@@ -16,6 +16,7 @@ func run() -> void:
 	_test_resolution_failures_do_not_mutate(index_script, resolver_script, state_script)
 	_test_malformed_index_fails_closed(index_script, resolver_script, state_script)
 	_test_index_loading_and_candidate_ownership(index_script)
+	_test_index_load_path_failures(index_script)
 
 func _test_first_matching_event_wins(index_script: Script, resolver_script: Script, state_script: Script) -> void:
 	var resolver: RefCounted = resolver_script.new()
@@ -102,6 +103,41 @@ func _test_index_loading_and_candidate_ownership(index_script: Script) -> void:
 		DirAccess.remove_absolute(absolute_path)
 	if DirAccess.dir_exists_absolute(absolute_dir):
 		DirAccess.remove_absolute(absolute_dir)
+
+func _test_index_load_path_failures(index_script: Script) -> void:
+	var output_dir := "user://test-output/dialogue-event-index-load-failures-%s" % Time.get_ticks_usec()
+	var absolute_dir := ProjectSettings.globalize_path(output_dir)
+	assert_eq(DirAccess.make_dir_recursive_absolute(absolute_dir), OK, "event index failure directory is created")
+	var missing_path := output_dir.path_join("missing.json")
+	var missing: RefCounted = index_script.load_path(missing_path)
+	assert_false(missing.is_valid(), "missing event index file fails closed")
+	assert_eq(missing.last_failure.get("code"), "load_failed", "missing event index has a stable load failure")
+	assert_eq(missing.last_failure.get("path"), missing_path, "missing event index failure retains its path")
+	var malformed_path := output_dir.path_join("malformed.json")
+	_write_event_index_fixture(malformed_path, "{")
+	var malformed: RefCounted = index_script.load_path(malformed_path)
+	assert_false(malformed.is_valid(), "malformed event index JSON fails closed")
+	assert_eq(malformed.last_failure.get("code"), "parse_failed", "malformed event index has a stable parse failure")
+	assert_eq(malformed.last_failure.get("path"), malformed_path, "malformed event index failure retains its path")
+	var root_path := output_dir.path_join("array.json")
+	_write_event_index_fixture(root_path, "[]")
+	var invalid_root: RefCounted = index_script.load_path(root_path)
+	assert_false(invalid_root.is_valid(), "non-dictionary event index root fails closed")
+	assert_eq(invalid_root.last_failure.get("code"), "invalid_root", "non-dictionary event index has a stable root failure")
+	assert_eq(invalid_root.last_failure.get("path"), root_path, "invalid-root event index failure retains its path")
+	for filename: String in ["malformed.json", "array.json"]:
+		var absolute_path := ProjectSettings.globalize_path(output_dir.path_join(filename))
+		if FileAccess.file_exists(absolute_path):
+			DirAccess.remove_absolute(absolute_path)
+	if DirAccess.dir_exists_absolute(absolute_dir):
+		DirAccess.remove_absolute(absolute_dir)
+
+func _write_event_index_fixture(path: String, content: String) -> void:
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	assert_not_null(file, "event index failure fixture opens: %s" % path)
+	if file != null:
+		file.store_string(content)
+		file.close()
 
 func _event_index(with_fallback := true) -> Dictionary:
 	var candidates: Array[Dictionary] = [{
