@@ -3,11 +3,11 @@
 [ext_resource type="Script" path="res://game/world/map_scene.gd" id="1_map"]
 [ext_resource type="Texture2D" path="res://assets/sprites/tilesets/floor.png" id="2_floor"]
 [ext_resource type="Texture2D" path="res://assets/sprites/tilesets/wall.png" id="3_wall"]
-[ext_resource type="PackedScene" path="res://game/actors/player/player.tscn" id="4_player"]
 [ext_resource type="PackedScene" path="res://content/interactables/sample_inspectable.tscn" id="5_mirror"]
 [ext_resource type="Texture2D" path="res://assets/sprites/item/bed.png" id="6_bed"]
 [ext_resource type="Texture2D" path="res://assets/sprites/item/bookshelf.png" id="7_bookshelf"]
 [ext_resource type="Texture2D" path="res://assets/sprites/item/desk.png" id="8_desk"]
+[ext_resource type="Script" path="res://game/interaction/interaction_target.gd" id="9_door_target"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape_horizontal"]
 size = Vector2(320, 16)
@@ -23,6 +23,9 @@ size = Vector2(27, 12)
 
 [sub_resource type="RectangleShape2D" id="RectangleShape_desk"]
 size = Vector2(43, 14)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape_door"]
+size = Vector2(20, 32)
 
 [node name="FoundationRoom" type="Node2D"]
 script = ExtResource("1_map")
@@ -61,6 +64,11 @@ stretch_mode = 1
 [node name="start" type="Marker2D" parent="EntryPoints"]
 position = Vector2(160, 112)
 
+[node name="from_hall" type="Marker2D" parent="EntryPoints"]
+position = Vector2(280, 112)
+
+[node name="Actors" type="Node2D" parent="."]
+
 [node name="VisualSort" type="Node2D" parent="."]
 y_sort_enabled = true
 
@@ -87,6 +95,18 @@ texture = ExtResource("8_desk")
 
 [node name="SampleInspectable" parent="VisualSort" instance=ExtResource("5_mirror")]
 position = Vector2(160, 76)
+
+[node name="HallDoor" type="Area2D" parent="VisualSort"]
+position = Vector2(300, 112)
+collision_layer = 2
+collision_mask = 0
+script = ExtResource("9_door_target")
+prompt = "복도로 나가기 [E]"
+action_kind = &"door"
+payload = {"map_id": &"foundation_hall", "spawn_id": &"from_room"}
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="VisualSort/HallDoor"]
+shape = SubResource("RectangleShape_door")
 
 [node name="PropCollisions" type="Node2D" parent="."]
 
@@ -133,7 +153,3 @@ position = Vector2(312, 96)
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="Boundaries/Right"]
 shape = SubResource("RectangleShape_vertical")
-
-[node name="Player" parent="." instance=ExtResource("4_player")]
-position = Vector2(160, 112)
-presentation_parent_path = NodePath("../VisualSort")

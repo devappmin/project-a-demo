@@ -1,0 +1,58 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://game/world/map_scene.gd" id="1_map"]
+[ext_resource type="Script" path="res://game/interaction/interaction_target.gd" id="2_target"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape_boundary"]
+size = Vector2(16, 192)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape_door"]
+size = Vector2(20, 32)
+
+[node name="FoundationHall" type="Node2D"]
+script = ExtResource("1_map")
+map_id = &"foundation_hall"
+room_bounds = Rect2(0, 0, 320, 192)
+
+[node name="Floor" type="Polygon2D" parent="."]
+polygon = PackedVector2Array(0, 0, 320, 0, 320, 192, 0, 192)
+color = Color(0.12, 0.16, 0.22, 1)
+
+[node name="EntryPoints" type="Node2D" parent="."]
+
+[node name="start" type="Marker2D" parent="EntryPoints"]
+position = Vector2(160, 112)
+
+[node name="from_room" type="Marker2D" parent="EntryPoints"]
+position = Vector2(40, 112)
+
+[node name="Actors" type="Node2D" parent="."]
+
+[node name="VisualSort" type="Node2D" parent="."]
+y_sort_enabled = true
+
+[node name="RoomDoor" type="Area2D" parent="VisualSort"]
+position = Vector2(20, 112)
+collision_layer = 2
+collision_mask = 0
+script = ExtResource("2_target")
+prompt = "방으로 들어가기 [E]"
+action_kind = &"door"
+payload = {"map_id": &"foundation_room", "spawn_id": &"from_hall"}
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="VisualSort/RoomDoor"]
+shape = SubResource("RectangleShape_door")
+
+[node name="Boundaries" type="Node2D" parent="."]
+
+[node name="Left" type="StaticBody2D" parent="Boundaries"]
+position = Vector2(8, 96)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Boundaries/Left"]
+shape = SubResource("RectangleShape_boundary")
+
+[node name="Right" type="StaticBody2D" parent="Boundaries"]
+position = Vector2(312, 96)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Boundaries/Right"]
+shape = SubResource("RectangleShape_boundary")

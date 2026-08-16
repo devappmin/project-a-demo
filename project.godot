@@ -18,6 +18,7 @@ run/main_scene="res://app/bootstrap/app_root.tscn"
 [autoload]
 
 GameSession="*res://app/session/game_session.gd"
+SceneDirector="*res://app/scene_flow/scene_director.gd"
 
 [input]
 

@@ -5,7 +5,6 @@ const PlayerInput = preload("res://game/actors/player/player_input.gd")
 
 @export var walk_speed := 48.0
 @export var sprint_speed := 72.0
-@export var presentation_parent_path: NodePath
 
 var facing := Vector2.DOWN
 
@@ -13,7 +12,6 @@ var facing := Vector2.DOWN
 @onready var animated_sprite: AnimatedSprite2D = $PlayerVisual/AnimatedSprite2D
 
 func _ready() -> void:
-	_attach_presentation()
 	_sync_presentation()
 	_update_animation(false)
 
@@ -51,13 +49,21 @@ func _facing_name() -> String:
 		return "up"
 	return "down"
 
-func _attach_presentation() -> void:
-	if presentation_parent_path.is_empty():
-		return
-	var presentation_parent := get_node_or_null(presentation_parent_path) as Node2D
-	if presentation_parent == null:
-		return
-	presentation.reparent(presentation_parent)
+func attach_presentation(parent: Node2D) -> Error:
+	if parent == null or presentation == null:
+		return ERR_INVALID_PARAMETER
+	if presentation.get_parent() != parent:
+		presentation.reparent(parent, true)
+	_sync_presentation()
+	return OK
+
+func detach_presentation() -> Error:
+	if presentation == null:
+		return ERR_DOES_NOT_EXIST
+	if presentation.get_parent() != self:
+		presentation.reparent(self, true)
+	presentation.position = Vector2(0.0, 17.0)
+	return OK
 
 func _sync_presentation() -> void:
 	if presentation != null and presentation.get_parent() != self:

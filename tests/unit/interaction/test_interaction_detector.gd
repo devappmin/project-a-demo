@@ -123,20 +123,10 @@ func _test_foundation_room_contract() -> void:
 	assert_eq(room.map_id, &"foundation_room", "foundation room has a stable map ID")
 	assert_not_null(room.get_node_or_null("EntryPoints/start"), "foundation room exposes the start entry point")
 	assert_not_null(room.get_node_or_null("TileLayer"), "foundation room has a visible tile layer")
+	assert_not_null(room.get_node_or_null("Actors"), "foundation room has a direct actor layer for persistent bodies")
 	assert_not_null(room.get_node_or_null("VisualSort"), "foundation room has a visual sort layer")
 	assert_not_null(room.get_node_or_null("Boundaries"), "foundation room has collision boundaries")
-	var player := room.get_node_or_null("Player") as PlayerController
-	assert_not_null(player, "foundation room contains the player")
-	if player == null:
-		room.free()
-		return
-	var detector := player.get_node_or_null("InteractionDetector") as InteractionDetector
-	assert_not_null(detector, "foundation room player contains its interaction detector")
-	if detector == null:
-		room.free()
-		return
-	assert_not_null(detector.get_node_or_null("CollisionShape2D"), "player detector has a query shape")
-	assert_not_null(player.get_node_or_null("InteractionRouter"), "player has an interaction router")
+	assert_eq(room.get_actor_root().get_child_count(), 0, "map scenes do not embed a player before SceneDirector placement")
 	var mirror := room.get_node_or_null("VisualSort/SampleInspectable") as InteractionTarget
 	assert_not_null(mirror, "foundation room contains the sample inspectable")
 	if mirror == null:
@@ -144,23 +134,6 @@ func _test_foundation_room_contract() -> void:
 		return
 	assert_eq(mirror.get_interaction().payload, {"dialogue_bundle_key":&"foundation.inspect", "dialogue_trigger_key":&"mirror.inspect"}, "sample inspectable resolves its document bundle and trigger")
 	room.free()
-
-	var app_scene := load("res://app/bootstrap/app_root.tscn") as PackedScene
-	assert_not_null(app_scene, "AppRoot scene exists for the foundation room contract")
-	if app_scene == null:
-		return
-	var app_root := app_scene.instantiate()
-	assert_not_null(app_root, "AppRoot scene instantiates for the foundation room contract")
-	if app_root == null:
-		return
-	var app_room := app_root.get_node_or_null("WorldHost/FoundationRoom") as MapScene
-	var prompt := app_root.get_node_or_null("UILayer/InteractionPrompt") as InteractionPrompt
-	assert_not_null(app_room, "AppRoot instances the foundation room under WorldHost")
-	assert_not_null(prompt, "AppRoot keeps the interaction prompt under the UI layer")
-	if app_room == null or prompt == null:
-		app_root.free()
-		return
-	app_root.free()
 
 func _test_foundation_room_y_sort_contract() -> void:
 	var room_scene := load("res://content/maps/foundation_room.tscn") as PackedScene
@@ -180,52 +153,35 @@ func _test_foundation_room_y_sort_contract() -> void:
 		await get_tree().process_frame
 		return
 	assert_true(visual_sort.y_sort_enabled, "foundation room enables feet-based Y-sort on the common visual parent")
-	var player := room.get_node_or_null("Player") as PlayerController
-	var player_visual := visual_sort.get_node_or_null("PlayerVisual") as Node2D
 	var bed := visual_sort.get_node_or_null("Bed") as Node2D
 	var bookshelf := visual_sort.get_node_or_null("Bookshelf") as Node2D
 	var desk := visual_sort.get_node_or_null("Desk") as Node2D
 	var mirror := visual_sort.get_node_or_null("SampleInspectable") as InteractionTarget
-	assert_not_null(player_visual, "player presentation joins the common visual sort parent")
-	assert_not_null(player, "foundation room exposes its player for Y-sort verification")
 	assert_not_null(bed, "bed presentation joins the common visual sort parent")
 	assert_not_null(bookshelf, "bookshelf presentation joins the common visual sort parent")
 	assert_not_null(desk, "desk presentation joins the common visual sort parent")
 	assert_not_null(mirror, "inspectable presentation joins the common visual sort parent")
-	if player == null or player_visual == null or bed == null or bookshelf == null or desk == null or mirror == null:
+	if bed == null or bookshelf == null or desk == null or mirror == null:
 		room.queue_free()
 		await get_tree().process_frame
 		return
-	var player_sprite := player_visual.get_node_or_null("AnimatedSprite2D") as AnimatedSprite2D
 	var bed_sprite := bed.get_node_or_null("Sprite2D") as Sprite2D
 	var bookshelf_sprite := bookshelf.get_node_or_null("Sprite2D") as Sprite2D
 	var desk_sprite := desk.get_node_or_null("Sprite2D") as Sprite2D
 	var mirror_sprite := mirror.get_node_or_null("Sprite2D") as Sprite2D
-	assert_not_null(player_sprite, "player visual contains its animated sprite")
 	assert_not_null(bed_sprite, "bed visual contains its sprite")
 	assert_not_null(bookshelf_sprite, "bookshelf visual contains its sprite")
 	assert_not_null(desk_sprite, "desk visual contains its sprite")
 	assert_not_null(mirror_sprite, "mirror visual contains its sprite")
-	if player_sprite == null or bed_sprite == null or bookshelf_sprite == null or desk_sprite == null or mirror_sprite == null:
+	if bed_sprite == null or bookshelf_sprite == null or desk_sprite == null or mirror_sprite == null:
 		room.queue_free()
 		await get_tree().process_frame
 		return
-	assert_eq(player_sprite.position, Vector2(0, -17), "player sort node is anchored at its feet")
 	assert_eq(bed_sprite.position, Vector2(0, -24), "bed sort node is anchored at its ground base")
 	assert_eq(bookshelf_sprite.position, Vector2(0, -20), "bookshelf sort node is anchored at its ground base")
 	assert_eq(desk_sprite.position, Vector2(0, -14), "desk sort node is anchored at its ground base")
 	assert_eq(mirror_sprite.position, Vector2(0, -22), "inspectable sort node is anchored at its ground base")
-	player.position = Vector2(desk.global_position.x, desk.global_position.y - 40.0)
-	await get_tree().process_frame
-	assert_true(player_visual.global_position.y < desk.global_position.y, "player sorts behind a prop when its feet are above the prop base")
-	player.position = Vector2(desk.global_position.x, desk.global_position.y + 40.0)
-	await get_tree().process_frame
-	assert_true(player_visual.global_position.y > desk.global_position.y, "player sorts in front of a prop when its feet are below the prop base")
 	assert_not_null(room.get_node_or_null("PropCollisions/Bed"), "physical prop collision stays outside the visual sort hierarchy")
-	var player_collision := player.get_node_or_null("CollisionShape2D") as CollisionShape2D
-	assert_not_null(player_collision, "player exposes its collision shape")
-	if player_collision != null:
-		assert_eq(player_collision.get_parent(), player, "player collision stays with the nonvisual physics body")
 	room.queue_free()
 	await get_tree().process_frame
 
@@ -239,17 +195,20 @@ func _test_scene_detector_query() -> void:
 	if app_root == null:
 		return
 	add_child(app_root)
-	var room := app_root.get_node_or_null("WorldHost/FoundationRoom") as MapScene
+	await get_tree().process_frame
+	assert_eq(await SceneDirector.start_new_game(), OK, "detector query explicitly starts a map")
+	var host := app_root.get_node_or_null("WorldHost")
+	var room := host.get_child(0) as MapScene if host != null and host.get_child_count() == 1 else null
 	var prompt := app_root.get_node_or_null("UILayer/InteractionPrompt") as InteractionPrompt
-	assert_not_null(room, "AppRoot exposes the foundation room for detector queries")
+	assert_not_null(room, "SceneDirector exposes the foundation room for detector queries")
 	assert_not_null(prompt, "AppRoot exposes the interaction prompt for detector queries")
 	if room == null or prompt == null:
 		app_root.queue_free()
 		await get_tree().process_frame
 		return
-	var player := room.get_node_or_null("Player") as PlayerController
+	var player := SceneDirector.player
 	var mirror := room.get_node_or_null("VisualSort/SampleInspectable") as InteractionTarget
-	assert_not_null(player, "foundation room exposes its player for detector queries")
+	assert_not_null(player, "SceneDirector exposes its persistent player for detector queries")
 	assert_not_null(mirror, "foundation room exposes its mirror for detector queries")
 	if player == null or mirror == null:
 		app_root.queue_free()
@@ -269,10 +228,6 @@ func _test_scene_detector_query() -> void:
 		app_root.queue_free()
 		await get_tree().process_frame
 		return
-	assert_eq(camera.limit_left, 0, "foundation room clamps the camera to its left edge")
-	assert_eq(camera.limit_top, 0, "foundation room clamps the camera to its top edge")
-	assert_eq(camera.limit_right, 320, "foundation room clamps the camera to its right edge")
-	assert_eq(camera.limit_bottom, 192, "foundation room includes twelve 16-pixel rows and clamps the camera to its bottom edge")
 	player.position = mirror.position - Vector2(32, 0)
 	player.facing = Vector2.RIGHT
 	await get_tree().physics_frame

@@ -1,0 +1,160 @@
+extends Node
+class_name SceneDirectorService
+
+const GameMode = preload("res://app/session/game_mode.gd")
+const PlayerScene = preload("res://game/actors/player/player.tscn")
+const DefaultRegistry = preload("res://data/maps/map_registry.tres")
+
+signal transition_started(from_map: StringName, to_map: StringName)
+signal map_committed(map_id: StringName, spawn_id: StringName, player: PlayerController)
+signal transition_failed(context: Dictionary)
+signal stable_checkpoint(kind: StringName)
+
+@export var map_registry: MapRegistry = DefaultRegistry
+
+var player: PlayerController
+var _world_host: Node2D
+var _fade: ScreenFade
+var _current_map: MapScene
+var _transition_in_progress := false
+
+func configure(world_host: Node2D, fade: ScreenFade) -> Error:
+	if world_host == null or fade == null:
+		return ERR_INVALID_PARAMETER
+	_world_host = world_host
+	_fade = fade
+	if not is_instance_valid(_current_map):
+		_current_map = null
+	if not is_instance_valid(player):
+		player = null
+	return OK
+
+func start_new_game(map_id: StringName = &"foundation_room", spawn_id: StringName = &"start") -> Error:
+	GameSession.reset_new_game()
+	return await change_map(map_id, spawn_id)
+
+func change_map(map_id: StringName, spawn_id: StringName) -> Error:
+	if _transition_in_progress:
+		return ERR_BUSY
+	var plan := prepare_restore(map_id, spawn_id)
+	if not plan.get("ok", false):
+		_emit_failure(map_id, spawn_id, plan.get("error", ERR_INVALID_DATA))
+		return plan.get("error", ERR_INVALID_DATA)
+	if _current_map != null:
+		var capture_error := _current_map.capture_world_objects(GameSession.world_state)
+		if capture_error != OK:
+			_free_plan_candidate(plan)
+			_emit_failure(map_id, spawn_id, capture_error)
+			return capture_error
+	var transition_error := await commit_restore(plan)
+	if transition_error != OK:
+		_emit_failure(map_id, spawn_id, transition_error)
+		return transition_error
+	stable_checkpoint.emit(&"map_transition")
+	return OK
+
+func prepare_restore(map_id: StringName, spawn_id: StringName) -> Dictionary:
+	if _world_host == null or map_registry == null:
+		return {"ok": false, "error": ERR_UNCONFIGURED}
+	var definition := map_registry.definition(map_id)
+	if definition == null:
+		return {"ok": false, "error": ERR_DOES_NOT_EXIST}
+	var packed_scene := load(definition.scene_path) as PackedScene
+	if packed_scene == null:
+		return {"ok": false, "error": ERR_FILE_NOT_FOUND}
+	var candidate := packed_scene.instantiate()
+	if not candidate is MapScene:
+		candidate.free()
+		return {"ok": false, "error": ERR_INVALID_DATA}
+	var map := candidate as MapScene
+	if map.map_id != definition.map_id or not map.validate_contract().is_empty() or map.get_spawn(spawn_id) == null:
+		map.free()
+		return {"ok": false, "error": ERR_INVALID_DATA}
+	return {"ok": true, "map": map, "map_id": map_id, "spawn_id": spawn_id}
+
+func commit_restore(plan: Dictionary) -> Error:
+	if _transition_in_progress:
+		return ERR_BUSY
+	if not plan.get("ok", false):
+		return plan.get("error", ERR_INVALID_DATA)
+	var candidate := plan.get("map") as MapScene
+	if candidate == null or _world_host == null:
+		return ERR_INVALID_PARAMETER
+	_transition_in_progress = true
+	var previous_mode := GameSession.current_mode
+	var old_map := _current_map
+	var from_map := old_map.map_id if old_map != null else StringName()
+	var target_map: StringName = plan.get("map_id", candidate.map_id)
+	var spawn_id: StringName = plan.get("spawn_id", StringName())
+	transition_started.emit(from_map, target_map)
+	GameSession.change_mode(GameMode.Value.TRANSITION)
+	await _fade.fade_out()
+
+	var old_body_parent: Node = player.get_parent() if player != null else null
+	var old_visual_parent: Node = player.presentation.get_parent() if player != null and player.presentation != null else null
+	var old_position := player.global_position if player != null else Vector2.ZERO
+	var error: Error = OK
+	if old_map != null:
+		_world_host.remove_child(old_map)
+	_world_host.add_child(candidate)
+	if candidate.apply_world_objects(GameSession.world_state) != OK:
+		error = ERR_INVALID_DATA
+	elif _place_player(candidate, spawn_id) != OK:
+		error = ERR_INVALID_DATA
+	if error != OK:
+		_world_host.remove_child(candidate)
+		candidate.queue_free()
+		if old_map != null:
+			_world_host.add_child(old_map)
+		_restore_player(old_body_parent, old_visual_parent, old_position)
+		GameSession.change_mode(previous_mode)
+		_transition_in_progress = false
+		await _fade.fade_in()
+		return error
+
+	_current_map = candidate
+	map_committed.emit(target_map, spawn_id, player)
+	if old_map != null:
+		old_map.queue_free()
+	GameSession.change_mode(GameMode.Value.EXPLORATION)
+	_transition_in_progress = false
+	await _fade.fade_in()
+	return OK
+
+func _place_player(map: MapScene, spawn_id: StringName) -> Error:
+	var actor_root := map.get_actor_root()
+	var visual_root := map.get_visual_root()
+	var spawn := map.get_spawn(spawn_id)
+	if actor_root == null or visual_root == null or spawn == null:
+		return ERR_INVALID_DATA
+	if player == null:
+		player = PlayerScene.instantiate() as PlayerController
+	if player == null:
+		return ERR_CANT_CREATE
+	if player.get_parent() == null:
+		actor_root.add_child(player)
+	var detach_error := player.detach_presentation()
+	if detach_error != OK:
+		return detach_error
+	if player.get_parent() != actor_root:
+		actor_root.add_child(player) if player.get_parent() == null else player.reparent(actor_root, true)
+	player.global_position = spawn.global_position
+	return player.attach_presentation(visual_root)
+
+func _restore_player(body_parent: Node, visual_parent: Node, previous_position: Vector2) -> void:
+	if player == null:
+		return
+	player.detach_presentation()
+	if body_parent != null:
+		body_parent.add_child(player) if player.get_parent() == null else player.reparent(body_parent, true)
+	player.global_position = previous_position
+	if visual_parent is Node2D:
+		player.attach_presentation(visual_parent as Node2D)
+
+func _free_plan_candidate(plan: Dictionary) -> void:
+	var candidate := plan.get("map") as MapScene
+	if candidate != null:
+		candidate.free()
+
+func _emit_failure(map_id: StringName, spawn_id: StringName, error: Error) -> void:
+	transition_failed.emit({"map_id": map_id, "spawn_id": spawn_id, "error": error})

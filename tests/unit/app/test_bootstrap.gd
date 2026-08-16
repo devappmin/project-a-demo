@@ -9,4 +9,9 @@ func run() -> void:
 	assert_not_null(root.get_node_or_null("WorldHost"), "WorldHost must exist")
 	assert_not_null(root.get_node_or_null("ServiceLayer"), "ServiceLayer must exist")
 	assert_not_null(root.get_node_or_null("UILayer"), "UILayer must exist")
+	var world_host := root.get_node_or_null("WorldHost")
+	assert_not_null(world_host, "WorldHost is available for SceneDirector configuration")
+	if world_host != null:
+		assert_eq(world_host.get_child_count(), 0, "WorldHost is empty at boot until gameplay explicitly starts")
+	assert_true(ProjectSettings.has_setting("autoload/SceneDirector"), "SceneDirector is registered as the second autoload")
 	root.free()

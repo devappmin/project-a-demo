@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="MapRegistry" load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://game/world/map_registry.gd" id="1_registry"]
+[ext_resource type="Script" path="res://game/world/map_definition.gd" id="2_definition"]
+[ext_resource type="Resource" path="res://data/maps/foundation_room.tres" id="3_room"]
+[ext_resource type="Resource" path="res://data/maps/foundation_hall.tres" id="4_hall"]
+
+[resource]
+script = ExtResource("1_registry")
+definitions = Array[ExtResource("2_definition")]([ExtResource("3_room"), ExtResource("4_hall")])

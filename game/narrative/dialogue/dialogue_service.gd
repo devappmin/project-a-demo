@@ -29,7 +29,7 @@ func _ready() -> void:
 		graph_loader = DialogueGraphLoader.new()
 	if game_session == null:
 		game_session = get_node_or_null("/root/GameSession")
-	if narrative_state == null and game_session != null:
+	if game_session != null:
 		narrative_state = game_session.narrative_state
 
 func _exit_tree() -> void:
@@ -59,7 +59,7 @@ func start_dialogue(scene_key: StringName, node_id := &"") -> Error:
 		return ERR_INVALID_PARAMETER
 	if game_session == null:
 		game_session = get_node_or_null("/root/GameSession")
-	if narrative_state == null and game_session != null:
+	if game_session != null:
 		narrative_state = game_session.narrative_state
 	if game_session == null or narrative_state == null:
 		_emit_failure({"reason":&"missing_dependency", "scene_key":scene_key, "node_id":entry_id})

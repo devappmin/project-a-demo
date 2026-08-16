@@ -36,8 +36,10 @@ func run() -> void:
 		return
 	get_tree().root.add_child(app)
 	await get_tree().process_frame
+	assert_eq(await SceneDirector.start_new_game(), OK, "dialogue integration explicitly starts gameplay from the boot menu")
+	await get_tree().process_frame
 
-	var router := app.get_node_or_null("WorldHost/FoundationRoom/Player/InteractionRouter") as InteractionRouter
+	var router := SceneDirector.player.get_node_or_null("InteractionRouter") as InteractionRouter if SceneDirector.player != null else null
 	var dialogue := app.get_node_or_null("ServiceLayer/DialogueService") as DialogueService
 	var view := app.get_node_or_null("UILayer/DialogueView") as DialogueView
 	assert_not_null(router, "real AppRoot exposes its player interaction router")
@@ -242,13 +244,13 @@ func _cleanup_document_event_resolution(adapter: Node, dialogue: DialogueService
 		DirAccess.remove_absolute(absolute_directory)
 
 func _test_visible_mirror_keyboard_flow(app: Node, router: InteractionRouter, dialogue: DialogueService, view: DialogueView, probe: UnhandledInputProbe) -> void:
-	var room := app.get_node_or_null("WorldHost/FoundationRoom") as MapScene
+	var room := _current_map(app)
 	var prompt := app.get_node_or_null("UILayer/InteractionPrompt") as InteractionPrompt
 	assert_not_null(room, "AppRoot exposes the foundation room")
 	assert_not_null(prompt, "AppRoot exposes the interaction prompt")
 	if room == null or prompt == null:
 		return
-	var player := room.get_node_or_null("Player") as PlayerController
+	var player := SceneDirector.player
 	var mirror := room.get_node_or_null("VisualSort/SampleInspectable") as InteractionTarget
 	assert_not_null(player, "foundation room exposes its player")
 	assert_not_null(mirror, "foundation room exposes its mirror")
@@ -374,12 +376,12 @@ func _test_plan3_replacement_snapshot(app: Node, dialogue: DialogueService, view
 	loader.base_directory = output_directory
 	dialogue.graph_loader = loader
 	GameSession.narrative_state.set_flag(&"mirror_seen", false)
-	var room := app.get_node_or_null("WorldHost/FoundationRoom") as MapScene
+	var room := _current_map(app)
 	assert_not_null(room, "replacement snapshot uses the real foundation room")
 	if room == null:
 		_cleanup_plan3_replacement(dialogue, original_loader, snapshot_path, absolute_directory)
 		return
-	var player := room.get_node_or_null("Player") as PlayerController
+	var player := SceneDirector.player
 	var mirror := room.get_node_or_null("VisualSort/SampleInspectable") as InteractionTarget
 	assert_not_null(player, "replacement snapshot uses the real player")
 	assert_not_null(mirror, "replacement snapshot uses the real mirror")
@@ -499,3 +501,7 @@ func _send_action(action: StringName, pressed: bool) -> void:
 	event.pressed = pressed
 	event.strength = 1.0 if pressed else 0.0
 	Input.parse_input_event(event)
+
+func _current_map(app: Node) -> MapScene:
+	var host := app.get_node_or_null("WorldHost")
+	return host.get_child(0) as MapScene if host != null and host.get_child_count() == 1 else null

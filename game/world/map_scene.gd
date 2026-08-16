@@ -8,6 +8,10 @@ func validate_contract() -> PackedStringArray:
 	var warnings := PackedStringArray()
 	if String(map_id).strip_edges().is_empty():
 		warnings.append("map_id must be nonempty.")
+	if get_actor_root() == null:
+		warnings.append("MapScene requires an Actors child.")
+	if get_visual_root() == null:
+		warnings.append("MapScene requires a VisualSort child.")
 	var entry_points := get_node_or_null("EntryPoints")
 	if entry_points == null:
 		warnings.append("MapScene requires an EntryPoints child.")
@@ -24,6 +28,48 @@ func validate_contract() -> PackedStringArray:
 		warnings.append("EntryPoints requires at least one direct Marker2D child.")
 	return warnings
 
+func get_spawn(spawn_id: StringName) -> Marker2D:
+	var entry_points := get_node_or_null("EntryPoints")
+	if entry_points == null:
+		return null
+	for child in entry_points.get_children():
+		if child is Marker2D and child.name == spawn_id:
+			return child as Marker2D
+	return null
+
+func get_actor_root() -> Node2D:
+	return get_node_or_null("Actors") as Node2D
+
+func get_visual_root() -> Node2D:
+	return get_node_or_null("VisualSort") as Node2D
+
+func capture_world_objects(world_state: WorldState) -> Error:
+	if world_state == null:
+		return ERR_INVALID_PARAMETER
+	for persistent_object in _persistent_world_objects():
+		var error := world_state.set_object(map_id, persistent_object.object_id, persistent_object.capture_persisted_state())
+		if error != OK:
+			return error
+	return OK
+
+func apply_world_objects(world_state: WorldState) -> Error:
+	if world_state == null:
+		return ERR_INVALID_PARAMETER
+	for persistent_object in _persistent_world_objects():
+		var state := world_state.get_object(map_id, persistent_object.object_id)
+		if state.is_empty():
+			continue
+		var error := persistent_object.apply_persisted_state(state)
+		if error != OK:
+			return error
+	return OK
+
+func _persistent_world_objects() -> Array[PersistentWorldObject]:
+	var objects: Array[PersistentWorldObject] = []
+	for node in find_children("*", "PersistentWorldObject", true, false):
+		objects.append(node as PersistentWorldObject)
+	return objects
+
 func validate_entry_names(entry_names: PackedStringArray) -> PackedStringArray:
 	var warnings := PackedStringArray()
 	var seen_names := {}
@@ -39,12 +85,3 @@ func validate_entry_names(entry_names: PackedStringArray) -> PackedStringArray:
 
 func _get_configuration_warnings() -> PackedStringArray:
 	return validate_contract()
-
-func _ready() -> void:
-	var camera := get_node_or_null("Player/Camera2D") as Camera2D
-	if camera == null or room_bounds.size == Vector2.ZERO:
-		return
-	camera.limit_left = int(room_bounds.position.x)
-	camera.limit_top = int(room_bounds.position.y)
-	camera.limit_right = int(room_bounds.end.x)
-	camera.limit_bottom = int(room_bounds.end.y)
