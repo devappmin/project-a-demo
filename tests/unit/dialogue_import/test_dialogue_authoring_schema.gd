@@ -50,6 +50,7 @@ func _test_stable_identity_through_comments_and_renames(identity: Script, schema
 func _test_contract_failures(schema: Script, fixture: Script, catalog: NarrativeCatalog, characters: Resource) -> void:
 	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][2]["name"] = bundle["triggers"][0]["events"][1]["flows"][1]["name"], "duplicate_flow_name")
 	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][2]["flow_key"] = "inspect", "duplicate_flow_key")
+	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["event_key"] = " ", "missing_event_key")
 	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle.erase("source_id"), "missing_source_id")
 	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][0]["blocks"][0]["speaker"] = "ghost", "unknown_character")
 	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][0]["blocks"][0]["expression"] = "ghost", "unknown_expression")

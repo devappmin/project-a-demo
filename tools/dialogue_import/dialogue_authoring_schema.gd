@@ -64,6 +64,7 @@ static func _validate_trigger(trigger: Dictionary, event_keys: Dictionary, catal
 static func _validate_event(event: Dictionary, event_keys: Dictionary, catalog: NarrativeCatalog, characters: Resource, trigger_context: Dictionary, issues: Array[Dictionary]) -> void:
 	var context := _context(event, trigger_context)
 	_validate_required_text(event, "source_id", context, issues)
+	_validate_required_text(event, "event_key", context, issues)
 	_validate_mappings(event.get("conditions", null), true, catalog, context, issues)
 	_validate_mappings(event.get("effects", null), false, catalog, context, issues)
 	var flows_value: Variant = event.get("flows", null)
