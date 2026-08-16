@@ -18,6 +18,7 @@ func run() -> void:
 	_validate_fixture_contract(validator)
 	_validate_schema_and_node_contract(validator)
 	_validate_rule_shapes(validator)
+	_validate_event_entries(validator)
 	_validate_reachable_cycles(validator)
 	_validate_automatic_path_limit(validator)
 	_validate_graph_immutability(graph_script)
@@ -111,6 +112,23 @@ func _validate_rule_shapes(validator: Variant) -> void:
 	var mismatch_issues: Array = _validate(validator, runtime_mismatch, [&"retti"])
 	assert_eq(_count_code(mismatch_issues, "invalid_condition"), 4, "validator rejects every condition StringName that runtime rejects")
 	assert_eq(_count_code(mismatch_issues, "invalid_effect"), 3, "validator rejects every effect StringName that runtime rejects")
+
+func _validate_event_entries(validator: Variant) -> void:
+	var method_info := {}
+	for candidate: Dictionary in validator.get_script_method_list():
+		if candidate.get("name", "") == "validate":
+			method_info = candidate
+			break
+	assert_eq(method_info.get("args", []).size(), 3, "validator accepts optional event entry roots")
+	if method_info.get("args", []).size() != 3:
+		return
+	var graph := _minimal_graph()
+	graph["nodes"]["second"] = {"type":"end"}
+	var characters: Array[StringName] = [&"retti"]
+	var valid_entries: Array[StringName] = [&"end", &"second"]
+	assert_false(_has_code(validator.validate(graph, characters, valid_entries), "invalid_event_entry"), "existing event entries are accepted")
+	var invalid_entries: Array[StringName] = [&"second", &"missing"]
+	assert_true(_has_code_at(validator.validate(graph, characters, invalid_entries), "invalid_event_entry", "missing"), "missing event entries have a stable issue")
 
 func _validate_reachable_cycles(validator: Variant) -> void:
 	var trapped := _minimal_graph()

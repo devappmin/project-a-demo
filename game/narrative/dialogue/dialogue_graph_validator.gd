@@ -7,7 +7,7 @@ const CONDITION_KINDS := ["flag", "stat", "inventory", "quest", "collectible"]
 const EFFECT_KINDS := ["flag_set", "stat_set", "stat_add", "inventory_add", "inventory_remove", "quest_set", "collectible_add"]
 const COMPARISON_OPERATORS := ["eq", "neq", "gt", "gte", "lt", "lte"]
 
-static func validate(data: Dictionary, character_keys: Array[StringName]) -> Array[Dictionary]:
+static func validate(data: Dictionary, character_keys: Array[StringName], entry_nodes: Array[StringName] = []) -> Array[Dictionary]:
 	var issues: Array[Dictionary] = []
 	var scene_key := _scene_key(data)
 	_validate_schema(data, scene_key, issues)
@@ -21,6 +21,7 @@ static func validate(data: Dictionary, character_keys: Array[StringName]) -> Arr
 		_add_issue(issues, "invalid_nodes", scene_key, "", "nodes must be a nonempty dictionary")
 	var node_ids := _sorted_node_ids(nodes, scene_key, issues)
 	_validate_entry(data, nodes, scene_key, issues)
+	_validate_event_entries(entry_nodes, nodes, scene_key, issues)
 	var adjacency := _empty_adjacency(node_ids)
 	for node_id: String in node_ids:
 		_validate_node(node_id, nodes[node_id], nodes, characters, scene_key, adjacency, issues)
@@ -66,6 +67,12 @@ static func _validate_entry(data: Dictionary, nodes: Dictionary, scene_key: Stri
 		_add_issue(issues, "invalid_entry_node", scene_key, "", "entry_node must be a nonempty string")
 	elif not nodes.has(String(entry)):
 		_add_issue(issues, "missing_entry_node", scene_key, String(entry), "entry_node does not reference a node")
+
+static func _validate_event_entries(entry_nodes: Array[StringName], nodes: Dictionary, scene_key: String, issues: Array[Dictionary]) -> void:
+	for entry_node: StringName in entry_nodes:
+		var entry := String(entry_node)
+		if entry.is_empty() or not nodes.has(entry):
+			_add_issue(issues, "invalid_event_entry", scene_key, entry, "event entry does not reference a node")
 
 static func _empty_adjacency(node_ids: Array[String]) -> Dictionary:
 	var adjacency := {}
