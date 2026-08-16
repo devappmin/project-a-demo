@@ -67,8 +67,8 @@ func _install_terms(value: Variant) -> void:
 		if StringName(kind) not in CONDITION_KINDS or key.is_empty() or display_name.is_empty():
 			_catalog_issues.append(_issue("invalid_term", "term requires a supported kind, key, and display_name"))
 			continue
-		if not _has_valid_aliases(term.get("aliases", [])):
-			_catalog_issues.append(_issue("invalid_aliases", "term aliases must be an array of strings"))
+		if not _has_required_term_metadata(term):
+			_catalog_issues.append(_issue("invalid_term_metadata", "term requires a text description, aliases, and default"))
 			continue
 		if not _has_valid_term_constraints(term, kind):
 			_catalog_issues.append(_issue("invalid_term_constraints", "term constraints do not match its kind"))
@@ -92,6 +92,9 @@ func _install_records(value: Variant, destination: Dictionary, label: String) ->
 		var display_name := String(record.get("display_name", ""))
 		if key.is_empty() or display_name.is_empty():
 			_catalog_issues.append(_issue("invalid_%s" % label, "%s requires a key and display_name" % label))
+			continue
+		if not _has_required_record_metadata(record):
+			_catalog_issues.append(_issue("invalid_%s_metadata" % label, "%s requires a text description and aliases" % label))
 			continue
 		if destination.has(key):
 			_catalog_issues.append(_issue("duplicate_%s" % label, "%s key is duplicated" % label))
@@ -136,7 +139,7 @@ func _has_valid_term_constraints(term: Dictionary, kind: String) -> bool:
 		"stat":
 			return _is_number(default_value) and _has_valid_numeric_bounds(term) and _is_within_bounds(default_value, term)
 		"inventory", "collectible":
-			return _is_number(default_value) and default_value >= 0.0 and _has_valid_numeric_bounds(term) and _is_within_bounds(default_value, term)
+			return _is_number(default_value) and default_value >= 0.0 and _has_non_negative_numeric_bounds(term) and _is_within_bounds(default_value, term)
 		"quest":
 			return typeof(default_value) == TYPE_STRING and _has_valid_stages(term) and String(default_value) in term["stages"]
 	return false
@@ -197,10 +200,21 @@ func _has_valid_aliases(value: Variant) -> bool:
 			return false
 	return true
 
+func _has_required_term_metadata(term: Dictionary) -> bool:
+	return term.has("description") and typeof(term["description"]) == TYPE_STRING and not String(term["description"]).is_empty() \
+		and term.has("aliases") and _has_valid_aliases(term["aliases"]) and term.has("default")
+
+func _has_required_record_metadata(record: Dictionary) -> bool:
+	return record.has("description") and typeof(record["description"]) == TYPE_STRING and not String(record["description"]).is_empty() \
+		and record.has("aliases") and _has_valid_aliases(record["aliases"])
+
 func _has_valid_numeric_bounds(term: Dictionary) -> bool:
 	var minimum: Variant = term.get("minimum", null)
 	var maximum: Variant = term.get("maximum", null)
 	return _is_number(minimum) and _is_number(maximum) and minimum <= maximum
+
+func _has_non_negative_numeric_bounds(term: Dictionary) -> bool:
+	return _has_valid_numeric_bounds(term) and term["minimum"] >= 0.0
 
 func _has_valid_stages(term: Dictionary) -> bool:
 	var stages: Variant = term.get("stages", null)

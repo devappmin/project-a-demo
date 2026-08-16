@@ -23,6 +23,6 @@ func run() -> void:
 
 func _unordered_catalog_data() -> Dictionary:
 	return {"schema_version":1, "terms":[
-		{"kind":"flag", "key":"zeta_flag", "display_name":"제타", "aliases":[], "default":false},
-		{"kind":"flag", "key":"alpha_flag", "display_name":"알파", "aliases":[], "default":false}
+		{"kind":"flag", "key":"zeta_flag", "display_name":"제타", "description":"제타 상태입니다.", "aliases":[], "default":false},
+		{"kind":"flag", "key":"alpha_flag", "display_name":"알파", "description":"알파 상태입니다.", "aliases":[], "default":false}
 	], "triggers":[], "commands":[]}
