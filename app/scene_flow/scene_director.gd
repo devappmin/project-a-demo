@@ -17,6 +17,9 @@ var _world_host: Node2D
 var _fade: ScreenFade
 var _current_map: MapScene
 var _transition_in_progress := false
+var _map_rebinder: Callable
+var _player_placement_hook: Callable
+var _transition_hook: Callable
 
 func configure(world_host: Node2D, fade: ScreenFade) -> Error:
 	if world_host == null or fade == null:
@@ -30,8 +33,28 @@ func configure(world_host: Node2D, fade: ScreenFade) -> Error:
 	return OK
 
 func start_new_game(map_id: StringName = &"foundation_room", spawn_id: StringName = &"start") -> Error:
+	if _transition_in_progress:
+		return ERR_BUSY
+	var plan := prepare_restore(map_id, spawn_id)
+	if not plan.get("ok", false):
+		_emit_failure(map_id, spawn_id, plan.get("error", ERR_INVALID_DATA))
+		return plan.get("error", ERR_INVALID_DATA)
 	GameSession.reset_new_game()
-	return await change_map(map_id, spawn_id)
+	var transition_error := await commit_restore(plan)
+	if transition_error != OK:
+		_emit_failure(map_id, spawn_id, transition_error)
+		return transition_error
+	stable_checkpoint.emit(&"map_transition")
+	return OK
+
+func set_map_rebinder(rebinder: Callable) -> void:
+	_map_rebinder = rebinder
+
+func set_player_placement_hook(hook: Callable) -> void:
+	_player_placement_hook = hook
+
+func set_transition_hook(hook: Callable) -> void:
+	_transition_hook = hook
 
 func change_map(map_id: StringName, spawn_id: StringName) -> Error:
 	if _transition_in_progress:
@@ -88,6 +111,8 @@ func commit_restore(plan: Dictionary) -> Error:
 	var spawn_id: StringName = plan.get("spawn_id", StringName())
 	transition_started.emit(from_map, target_map)
 	GameSession.change_mode(GameMode.Value.TRANSITION)
+	if _transition_hook.is_valid():
+		_transition_hook.call()
 	await _fade.fade_out()
 
 	var old_body_parent: Node = player.get_parent() if player != null else null
@@ -97,10 +122,15 @@ func commit_restore(plan: Dictionary) -> Error:
 	if old_map != null:
 		_world_host.remove_child(old_map)
 	_world_host.add_child(candidate)
-	if candidate.apply_world_objects(GameSession.world_state) != OK:
-		error = ERR_INVALID_DATA
-	elif _place_player(candidate, spawn_id) != OK:
-		error = ERR_INVALID_DATA
+	var world_error := candidate.apply_world_objects(GameSession.world_state)
+	if world_error != OK:
+		error = world_error
+	else:
+		var placement_error: Error = int(_player_placement_hook.call(candidate, spawn_id)) if _player_placement_hook.is_valid() else _place_player(candidate, spawn_id)
+		if placement_error != OK:
+			error = placement_error
+		elif _map_rebinder.is_valid():
+			error = int(_map_rebinder.call(player))
 	if error != OK:
 		_world_host.remove_child(candidate)
 		candidate.queue_free()

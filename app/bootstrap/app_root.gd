@@ -14,26 +14,24 @@ const GameMode = preload("res://app/session/game_mode.gd")
 func _ready() -> void:
 	if SceneDirector.configure(world_host as Node2D, screen_fade) != OK:
 		return
-	if not SceneDirector.map_committed.is_connected(_on_map_committed):
-		SceneDirector.map_committed.connect(_on_map_committed)
+	SceneDirector.set_map_rebinder(_rebind_player)
 	GameSession.change_mode(GameMode.Value.MENU)
 
-func _exit_tree() -> void:
-	if SceneDirector.map_committed.is_connected(_on_map_committed):
-		SceneDirector.map_committed.disconnect(_on_map_committed)
-
-func _on_map_committed(_map_id: StringName, _spawn_id: StringName, player: PlayerController) -> void:
+func _rebind_player(player: PlayerController) -> Error:
+	if player == null:
+		return ERR_INVALID_PARAMETER
 	var detector := player.get_node_or_null("InteractionDetector") as InteractionDetector
 	var router := player.get_node_or_null("InteractionRouter") as InteractionRouter
-	prompt.bind_detector(detector)
-	if router == null:
-		return
+	if detector == null or router == null:
+		return ERR_DOES_NOT_EXIST
 	router.detector = detector
 	_disconnect_adapter(router, dialogue_adapter.handle_action)
 	_disconnect_adapter(router, door_adapter.handle_action)
 	router.action_requested.connect(dialogue_adapter.handle_action)
 	door_adapter.scene_director = SceneDirector
 	router.action_requested.connect(door_adapter.handle_action)
+	prompt.bind_detector(detector)
+	return OK
 
 func _disconnect_adapter(router: InteractionRouter, handler: Callable) -> void:
 	if router.action_requested.is_connected(handler):

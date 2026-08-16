@@ -26,6 +26,8 @@ func _handle_document_dialogue(payload: Dictionary) -> Error:
 		return ERR_INVALID_PARAMETER
 	if event_resolver == null:
 		event_resolver = DialogueEventResolverResource.new()
+	if dialogue_service.refresh_session_state() != OK:
+		return ERR_UNCONFIGURED
 	var resolved: Dictionary = event_resolver.resolve(bundle_key, trigger_key, dialogue_service.narrative_state)
 	if not resolved.get("ok", false):
 		return resolved.get("error", ERR_INVALID_DATA)

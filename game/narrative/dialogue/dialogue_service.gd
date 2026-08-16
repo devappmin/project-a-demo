@@ -57,11 +57,7 @@ func start_dialogue(scene_key: StringName, node_id := &"") -> Error:
 	if loaded_graph.get_node(entry_id).is_empty():
 		_emit_failure({"reason":&"invalid_entry", "scene_key":scene_key, "node_id":entry_id})
 		return ERR_INVALID_PARAMETER
-	if game_session == null:
-		game_session = get_node_or_null("/root/GameSession")
-	if game_session != null:
-		narrative_state = game_session.narrative_state
-	if game_session == null or narrative_state == null:
+	if refresh_session_state() != OK:
 		_emit_failure({"reason":&"missing_dependency", "scene_key":scene_key, "node_id":entry_id})
 		return ERR_UNCONFIGURED
 	_previous_mode = game_session.current_mode
@@ -74,6 +70,14 @@ func start_dialogue(scene_key: StringName, node_id := &"") -> Error:
 	_available_choices.clear()
 	_active = true
 	return _dispatch_until_boundary()
+
+func refresh_session_state() -> Error:
+	if game_session == null:
+		game_session = get_node_or_null("/root/GameSession")
+	if game_session == null or game_session.narrative_state == null:
+		return ERR_UNCONFIGURED
+	narrative_state = game_session.narrative_state
+	return OK
 
 func advance() -> void:
 	if not _active or current_graph == null:
