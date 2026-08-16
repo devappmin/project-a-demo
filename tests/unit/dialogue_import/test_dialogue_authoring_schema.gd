@@ -23,6 +23,7 @@ func run() -> void:
 	_test_stable_identity_through_comments_and_renames(identity, schema, fixture, catalog, characters)
 	_test_contract_failures(schema, fixture, catalog, characters)
 	_test_fail_closed_shapes(schema, fixture, catalog, characters)
+	_test_field_type_contract(schema, fixture, catalog, characters)
 	_test_same_bundle_cross_trigger_event_target(schema, fixture, characters)
 	_test_command_argument_contract(schema, fixture, characters)
 
@@ -95,6 +96,68 @@ func _test_fail_closed_shapes(schema: Script, fixture: Script, catalog: Narrativ
 	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][0]["conditions"][0]["source_id"] = "mapping-source", "invalid_condition")
 	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["effects"][0]["operator"] = "eq", "invalid_effect")
 	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["effects"][0]["source_id"] = "mapping-source", "invalid_effect")
+
+func _test_field_type_contract(schema: Script, fixture: Script, catalog: NarrativeCatalog, characters: Resource) -> void:
+	var cases := [
+		{"name":"bundle source_id", "code":"invalid_source_id", "mutate":func(bundle: Dictionary): bundle["source_id"] = 7},
+		{"name":"bundle source_url", "code":"invalid_source_url", "mutate":func(bundle: Dictionary): bundle["source_url"] = []},
+		{"name":"bundle key", "code":"invalid_bundle_key", "mutate":func(bundle: Dictionary): bundle["bundle_key"] = 7},
+		{"name":"bundle title", "code":"invalid_title", "mutate":func(bundle: Dictionary): bundle["title"] = 7},
+		{"name":"bundle comments", "code":"invalid_comments", "mutate":func(bundle: Dictionary): bundle["comments"] = {}},
+		{"name":"triggers container", "code":"invalid_triggers", "mutate":func(bundle: Dictionary): bundle["triggers"] = {}},
+		{"name":"trigger source_id", "code":"invalid_source_id", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["source_id"] = 7},
+		{"name":"trigger source_url", "code":"invalid_source_url", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["source_url"] = 7},
+		{"name":"trigger key", "code":"invalid_trigger_key", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["trigger_key"] = 7},
+		{"name":"trigger name", "code":"invalid_name", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["name"] = 7},
+		{"name":"trigger comments", "code":"invalid_comments", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["comments"] = {}},
+		{"name":"events container", "code":"invalid_events", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"] = {}},
+		{"name":"event source_id", "code":"invalid_source_id", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][0]["source_id"] = 7},
+		{"name":"event source_url", "code":"invalid_source_url", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][0]["source_url"] = 7},
+		{"name":"event key", "code":"invalid_event_key", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][0]["event_key"] = 7},
+		{"name":"event name", "code":"invalid_name", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][0]["name"] = 7},
+		{"name":"event comments", "code":"invalid_comments", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][0]["comments"] = {}},
+		{"name":"event conditions", "code":"invalid_conditions", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][0]["conditions"] = {}},
+		{"name":"event effects", "code":"invalid_effects", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][0]["effects"] = {}},
+		{"name":"flows container", "code":"invalid_flows", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][0]["flows"] = {}},
+		{"name":"flow source_id", "code":"invalid_source_id", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][1]["source_id"] = 7},
+		{"name":"flow source_url", "code":"invalid_source_url", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][1]["source_url"] = 7},
+		{"name":"flow key", "code":"invalid_flow_key", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][1]["flow_key"] = 7},
+		{"name":"flow name", "code":"invalid_flow_name", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][1]["name"] = 7},
+		{"name":"flow comments", "code":"invalid_comments", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][1]["comments"] = {}},
+		{"name":"flow effects", "code":"invalid_effects", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][1]["effects"] = {}},
+		{"name":"blocks container", "code":"invalid_blocks", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][1]["blocks"] = {}},
+		{"name":"block type", "code":"invalid_block_type", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][0]["flows"][0]["blocks"][0]["type"] = 7},
+		{"name":"block source_id", "code":"invalid_source_id", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][0]["flows"][0]["blocks"][0]["source_id"] = 7},
+		{"name":"block source_url", "code":"invalid_source_url", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][0]["flows"][0]["blocks"][0]["source_url"] = 7},
+		{"name":"optional block key", "code":"invalid_block_key", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][0]["flows"][0]["blocks"][0]["block_key"] = 7},
+		{"name":"block comments", "code":"invalid_comments", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][0]["flows"][0]["blocks"][0]["comments"] = {}},
+		{"name":"line speaker", "code":"invalid_speaker", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][0]["flows"][0]["blocks"][0]["speaker"] = 7},
+		{"name":"line expression", "code":"invalid_expression", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][0]["flows"][0]["blocks"][0]["expression"] = 7},
+		{"name":"line text", "code":"invalid_line_text", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][0]["flows"][0]["blocks"][0]["text"] = 7},
+		{"name":"command key", "code":"invalid_command_key", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][1]["blocks"][1]["command_key"] = 7},
+		{"name":"choice items", "code":"invalid_choice_items", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][0]["blocks"][2]["items"] = {}},
+		{"name":"choice source_id", "code":"invalid_source_id", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][0]["blocks"][2]["items"][0]["source_id"] = 7},
+		{"name":"choice source_url", "code":"invalid_source_url", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][0]["blocks"][2]["items"][0]["source_url"] = 7},
+		{"name":"choice text", "code":"invalid_choice_text", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][0]["blocks"][2]["items"][0]["text"] = 7},
+		{"name":"optional choice key", "code":"invalid_choice_key", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][0]["blocks"][2]["items"][0]["choice_key"] = 7},
+		{"name":"choice comments", "code":"invalid_comments", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][0]["blocks"][2]["items"][0]["comments"] = {}},
+		{"name":"target kind", "code":"invalid_target_kind_type", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][2]["blocks"][1]["target_kind"] = 7},
+		{"name":"target key", "code":"invalid_target_key", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][2]["blocks"][1]["target_key"] = 7},
+		{"name":"mapping source_text", "code":"invalid_source_text", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][0]["conditions"][0]["source_text"] = 7},
+		{"name":"missing mapping source_text", "code":"missing_source_text", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][0]["conditions"][0].erase("source_text")},
+		{"name":"mapping term_name", "code":"invalid_term_name", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][0]["conditions"][0]["term_name"] = 7},
+		{"name":"mapping status", "code":"invalid_mapping_status", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][0]["conditions"][0]["mapping_status"] = 7},
+		{"name":"mapping kind", "code":"invalid_kind", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][0]["conditions"][0]["kind"] = 7},
+		{"name":"mapping key", "code":"invalid_key", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][0]["conditions"][0]["key"] = 7},
+		{"name":"mapping operator", "code":"invalid_operator", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][0]["conditions"][0]["operator"] = 7},
+		{"name":"mapping comments", "code":"invalid_comments", "mutate":func(bundle: Dictionary): bundle["triggers"][0]["events"][0]["conditions"][0]["comments"] = {}},
+	]
+	for case_value: Variant in cases:
+		var case_data: Dictionary = case_value
+		var bundle: Dictionary = fixture.valid_bundle()
+		(case_data["mutate"] as Callable).call(bundle)
+		var issues: Array = schema.validate_bundle(bundle, catalog, characters)
+		assert_true(_has_issue(issues, String(case_data["code"]), "error"), "wrong-type %s fails with %s" % [case_data["name"], case_data["code"]])
 
 func _test_same_bundle_cross_trigger_event_target(schema: Script, fixture: Script, characters: Resource) -> void:
 	var bundle: Dictionary = fixture.valid_bundle()
