@@ -1,7 +1,8 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://game/interaction/interaction_target.gd" id="1_target"]
 [ext_resource type="Texture2D" path="res://assets/sprites/item/mirror.png" id="2_mirror"]
+[ext_resource type="Script" path="res://game/world/persistent_world_object.gd" id="3_persistent"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape_mirror"]
 size = Vector2(24, 40)
@@ -21,3 +22,7 @@ texture = ExtResource("2_mirror")
 [node name="CollisionShape2D" type="CollisionShape2D" parent="."]
 position = Vector2(0, -22)
 shape = SubResource("RectangleShape_mirror")
+
+[node name="PersistentWorldObject" type="Node" parent="."]
+script = ExtResource("3_persistent")
+object_id = &"mirror"
