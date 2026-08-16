@@ -1,6 +1,7 @@
 extends "res://tests/support/test_case.gd"
 
 const MENU_PATH := "res://ui/menus/save_slot_menu.tscn"
+const KNOWN_UTC_UNIX := 1786883696
 
 func run() -> void:
 	assert_true(ResourceLoader.exists(MENU_PATH), "the reusable save-slot menu scene exists")
@@ -63,17 +64,19 @@ func _test_populated_metadata_formatting_and_clipping() -> void:
 	var auto_row := rows[0] as Control
 	assert_eq(auto_row.get_node("Content/Location").text, "기초 홀", "a populated row renders its location")
 	assert_eq(auto_row.get_node("Content/PlayTime").text, "00:20:34", "play time renders as HH:MM:SS")
+	var system_bias_minutes := int(Time.get_time_zone_from_system().get("bias", 0))
+	var expected_local := _expected_local_display(KNOWN_UTC_UNIX, system_bias_minutes)
 	var timestamp_cases := [
-		{"value": "2026-08-16T12:34:56Z", "expected": "2026-08-16 21:34", "label": "UTC Z"},
-		{"value": "2026-08-16T21:34:56+09:00", "expected": "2026-08-16 21:34", "label": "positive source offset"},
-		{"value": "2026-08-16T08:34:56-04:00", "expected": "2026-08-16 21:34", "label": "negative source offset"},
+		{"value": "2026-08-16T12:34:56Z", "expected": expected_local, "label": "UTC Z"},
+		{"value": "2026-08-16T21:34:56+09:00", "expected": expected_local, "label": "positive source offset"},
+		{"value": "2026-08-16T08:34:56-04:00", "expected": expected_local, "label": "negative source offset"},
 		{"value": "not-a-timestamp", "expected": "", "label": "malformed timestamp"},
 	]
 	for case_data: Dictionary in timestamp_cases:
 		var item: Dictionary = metadata[0].duplicate(true)
 		item["saved_at"] = case_data["value"]
 		assert_eq(auto_row.call("configure", item, &"load"), OK, "%s timestamp fixture configures" % case_data["label"])
-		assert_eq(auto_row.get_node("Content/SavedAt").text, case_data["expected"], "%s is interpreted as an instant and rendered in Korea local time" % case_data["label"])
+		assert_eq(auto_row.get_node("Content/SavedAt").text, case_data["expected"], "%s is interpreted as the known instant and rendered in system local time" % case_data["label"])
 	var long_row := rows[1] as Control
 	var location := long_row.get_node("Content/Location") as Label
 	assert_true(location.clip_text, "long locations are clipped within the location cell")
@@ -171,6 +174,10 @@ func _contains_type(node: Node, type_name: String) -> bool:
 		if _contains_type(child, type_name):
 			return true
 	return false
+
+func _expected_local_display(utc_unix: int, bias_minutes: int) -> String:
+	var local := Time.get_datetime_dict_from_unix_time(utc_unix + bias_minutes * 60)
+	return "%04d-%02d-%02d %02d:%02d" % [local.year, local.month, local.day, local.hour, local.minute]
 
 func _contains_named_control(node: Node, fragment: String) -> bool:
 	if node is Control and String(node.name).to_lower().contains(fragment):
