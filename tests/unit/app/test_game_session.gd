@@ -13,6 +13,7 @@ func run() -> void:
 	assert_false(session.change_mode(GameMode.Value.BOOT), "runtime cannot return to boot")
 	_test_menu_origin_is_explicit(session)
 	_test_mode_context_round_trip(session)
+	_test_reset_replaces_narrative_state(session)
 	_test_restore_rejects_live_narrative_values(session)
 	session.free()
 
@@ -58,3 +59,11 @@ func _test_restore_rejects_live_narrative_values(session: GameSessionService) ->
 	assert_eq(session.restore_session(invalid_restore), ERR_INVALID_DATA, "session restore rejects live values nested in NarrativeState")
 	assert_eq(session.snapshot_session(), before, "rejected narrative restore preserves the complete session")
 	forbidden_node.free()
+
+func _test_reset_replaces_narrative_state(session: GameSessionService) -> void:
+	var previous_narrative_state := session.narrative_state
+	previous_narrative_state.set_flag(&"retained_before_reset", true)
+	session.reset_new_game()
+	assert_true(session.narrative_state != previous_narrative_state, "new-game reset replaces NarrativeState instead of mutating retained references")
+	assert_true(previous_narrative_state.get_flag(&"retained_before_reset"), "new-game reset leaves the old NarrativeState reference unchanged")
+	assert_false(session.narrative_state.get_flag(&"retained_before_reset"), "new-game reset begins with a clean NarrativeState")
