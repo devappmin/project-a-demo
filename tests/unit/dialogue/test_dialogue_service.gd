@@ -45,6 +45,8 @@ func run() -> void:
 	_test_choice_filtering_index_stability_and_checkpoint(service_script)
 	_test_checkpoint_provenance_validation_and_resume(service_script)
 	_test_important_choice_checkpoint_publication(service_script)
+	_test_line_callback_reentrancy_preserves_outer_checkpoint(service_script)
+	_test_choice_callback_reentrancy_preserves_outer_checkpoint(service_script)
 	_test_zero_visible_choices_fail_safely(service_script)
 	_test_runtime_failure_rolls_back_choice_effects(service_script)
 	_test_downstream_choice_failure_rolls_back_before_publication(service_script)
@@ -346,6 +348,67 @@ func _test_important_choice_checkpoint_publication(service_script: Variant) -> v
 	assert_true(session.narrative_state.get_flag(&"end_applied"), "important end applies choice effects")
 	assert_eq(_stable_checkpoints, [{"kind":&"important_choice", "checkpoint":{"active":false}}], "important choice followed by end emits one inactive checkpoint")
 	assert_eq(session.current_mode, GameModeResource.Value.EXPLORATION, "important end restores exploration")
+	service.free()
+	session.free()
+
+func _test_line_callback_reentrancy_preserves_outer_checkpoint(service_script: Variant) -> void:
+	_reset_captures()
+	var outer_graph := _graph("outer.line", "important_choice", {
+		"important_choice":{"type":"choice", "autosave":true, "items":[{"text":"continue", "conditions":[], "effects":[], "next":"outer_line"}]},
+		"outer_line":{"type":"line", "speaker":"retti", "expression":"neutral", "text":"outer boundary", "next":"nested_line"},
+		"nested_line":{"type":"line", "speaker":"retti", "expression":"neutral", "text":"nested boundary", "next":"end"},
+		"end":{"type":"end"},
+	})
+	var replacement_graph := _line_graph("replacement.line")
+	var loader := GraphLoaderStub.new()
+	loader.graphs["outer.line"] = outer_graph
+	loader.graphs["replacement.line"] = replacement_graph
+	var session := _session_in_mode(GameModeResource.Value.EXPLORATION)
+	var service: Variant = _configured_service(service_script, loader, session)
+	var observation := {"nested_advance_count":0, "restart_error":FAILED}
+	service.line_requested.connect(func(_character: StringName, _expression: StringName, text: String) -> void:
+		if text == "outer boundary":
+			observation["nested_advance_count"] += 1
+			service.advance()
+		elif text == "nested boundary":
+			service.abort_dialogue(&"replace_after_nested_line")
+			observation["restart_error"] = service.start_dialogue(&"replacement.line", &"", {"bundle_key":"replacement.line", "trigger_key":"replacement.trigger"})
+	)
+	assert_eq(service.start_dialogue(&"outer.line", &"", {"bundle_key":"outer.line", "trigger_key":"outer.trigger"}), OK, "line reentrancy fixture reaches its important choice")
+	assert_eq(service.choose(0), OK, "important choice survives nested line dispatch and replacement start")
+	assert_eq(observation["nested_advance_count"], 1, "outer line callback advances synchronously exactly once")
+	assert_eq(observation["restart_error"], OK, "nested line callback starts the replacement dialogue")
+	assert_eq(_stable_checkpoints, [{"kind":&"important_choice", "checkpoint":{"active":true, "bundle_key":"outer.line", "trigger_key":"outer.trigger", "node_id":"outer_line", "boundary":"line"}}], "outer important choice emits its own line checkpoint exactly once after nested replacement")
+	assert_not_null(service.current_graph, "replacement dialogue remains active after outer choose returns")
+	if service.current_graph != null:
+		assert_eq(service.current_graph.scene_key, &"replacement.line", "outer result never replaces the synchronously started dialogue")
+	assert_eq(service.get_checkpoint(), {"active":true, "bundle_key":"replacement.line", "trigger_key":"replacement.trigger", "node_id":"line", "boundary":"line"}, "outer autosave signal never borrows or overwrites the replacement checkpoint")
+	service.abort_dialogue(&"test_cleanup")
+	service.free()
+	session.free()
+
+func _test_choice_callback_reentrancy_preserves_outer_checkpoint(service_script: Variant) -> void:
+	_reset_captures()
+	var graph := _graph("outer.choice", "important_choice", {
+		"important_choice":{"type":"choice", "autosave":true, "items":[{"text":"continue", "conditions":[], "effects":[], "next":"outer_choice"}]},
+		"outer_choice":{"type":"choice", "items":[{"text":"nested continue", "conditions":[], "effects":[], "next":"nested_line"}]},
+		"nested_line":{"type":"line", "speaker":"retti", "expression":"neutral", "text":"nested choice result", "next":"end"},
+		"end":{"type":"end"},
+	})
+	var session := _session_in_mode(GameModeResource.Value.EXPLORATION)
+	var service: Variant = _service_for_graph(service_script, graph, session)
+	assert_eq(service.start_dialogue(&"outer.choice", &"", {"bundle_key":"outer.choice", "trigger_key":"outer.trigger"}), OK, "choice reentrancy fixture reaches its important choice")
+	var nested_choose := {"count":0, "error":FAILED}
+	service.choices_requested.connect(func(_items: Array[Dictionary]) -> void:
+		if service.current_node_id == &"outer_choice" and nested_choose["count"] == 0:
+			nested_choose["count"] += 1
+			nested_choose["error"] = service.choose(0)
+	)
+	assert_eq(service.choose(0), OK, "important choice survives a synchronous nested choice selection")
+	assert_eq(nested_choose, {"count":1, "error":OK}, "outer choice callback performs one successful nested choose")
+	assert_eq(_stable_checkpoints, [{"kind":&"important_choice", "checkpoint":{"active":true, "bundle_key":"outer.choice", "trigger_key":"outer.trigger", "node_id":"outer_choice", "boundary":"choice"}}], "outer important choice emits its own choice checkpoint exactly once after nested choose")
+	assert_eq(service.get_checkpoint(), {"active":true, "bundle_key":"outer.choice", "trigger_key":"outer.trigger", "node_id":"nested_line", "boundary":"line"}, "nested choice dispatch retains its current line checkpoint without replacing the outer signal payload")
+	service.abort_dialogue(&"test_cleanup")
 	service.free()
 	session.free()
 

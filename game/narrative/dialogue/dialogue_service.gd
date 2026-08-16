@@ -24,7 +24,6 @@ var _available_choices: Array[Dictionary] = []
 var _deferred_failure_reason: StringName = &""
 var _run_generation := 0
 var _dispatch_state_by_generation: Dictionary = {}
-var _dispatch_checkpoint_by_generation: Dictionary = {}
 var _bundle_key: StringName = &""
 var _trigger_key: StringName = &""
 var _checkpoint: Dictionary = {}
@@ -80,10 +79,7 @@ func start_dialogue(scene_key: StringName, node_id := &"", context := {}) -> Err
 	_checkpoint.clear()
 	_available_choices.clear()
 	_active = true
-	var dispatch_generation := _run_generation
-	var error := _dispatch_until_boundary()
-	_dispatch_checkpoint_by_generation.erase(dispatch_generation)
-	return error
+	return _dispatch_until_boundary({})
 
 func validate_checkpoint(checkpoint: Dictionary) -> Error:
 	if checkpoint.get("active", null) != true:
@@ -133,10 +129,7 @@ func resume_checkpoint(checkpoint: Dictionary) -> Error:
 	_checkpoint = checkpoint.duplicate(true)
 	_available_choices.clear()
 	_active = true
-	var dispatch_generation := _run_generation
-	var error := _dispatch_until_boundary()
-	_dispatch_checkpoint_by_generation.erase(dispatch_generation)
-	return error
+	return _dispatch_until_boundary({})
 
 func refresh_session_state() -> Error:
 	if game_session == null:
@@ -157,9 +150,7 @@ func advance() -> void:
 		_runtime_failure(ERR_INVALID_DATA, &"invalid_next")
 		return
 	current_node_id = next_id
-	var dispatch_generation := _run_generation
-	_dispatch_until_boundary()
-	_dispatch_checkpoint_by_generation.erase(dispatch_generation)
+	_dispatch_until_boundary({})
 
 func choose(index: int) -> Error:
 	if not _active or current_graph == null:
@@ -183,18 +174,16 @@ func choose(index: int) -> Error:
 	_available_choices.clear()
 	current_node_id = next_id
 	_deferred_failure_reason = &""
-	var dispatch_generation := _run_generation
-	var dispatch_error := _dispatch_until_boundary(false, state_before)
+	var dispatch_result: Dictionary = {}
+	var dispatch_error := _dispatch_until_boundary(dispatch_result, false, state_before)
 	if dispatch_error != OK:
-		_dispatch_checkpoint_by_generation.erase(dispatch_generation)
 		narrative_state.restore(state_before)
 		var failure_reason := _deferred_failure_reason if not _deferred_failure_reason.is_empty() else &"dispatch_failed"
 		return _runtime_failure(dispatch_error, failure_reason)
 	if should_publish_checkpoint:
-		var checkpoint_value: Variant = _dispatch_checkpoint_by_generation.get(dispatch_generation, {})
+		var checkpoint_value: Variant = dispatch_result.get("checkpoint", {})
 		if typeof(checkpoint_value) == TYPE_DICTIONARY and not (checkpoint_value as Dictionary).is_empty():
 			stable_checkpoint_reached.emit(&"important_choice", (checkpoint_value as Dictionary).duplicate(true))
-	_dispatch_checkpoint_by_generation.erase(dispatch_generation)
 	return dispatch_error
 
 func abort_dialogue(reason: StringName) -> void:
@@ -205,9 +194,8 @@ func abort_dialogue(reason: StringName) -> void:
 func get_checkpoint() -> Dictionary:
 	return _checkpoint.duplicate(true)
 
-func _dispatch_until_boundary(publish_failure := true, transaction_state: Dictionary = {}) -> Error:
+func _dispatch_until_boundary(result_holder: Dictionary, publish_failure := true, transaction_state: Dictionary = {}) -> Error:
 	var dispatch_generation := _run_generation
-	_dispatch_checkpoint_by_generation.erase(dispatch_generation)
 	var state_before: Dictionary = transaction_state.duplicate(true) if not transaction_state.is_empty() else narrative_state.snapshot()
 	_dispatch_state_by_generation[dispatch_generation] = state_before.duplicate(true)
 	var automatic_steps := 0
@@ -219,7 +207,7 @@ func _dispatch_until_boundary(publish_failure := true, transaction_state: Dictio
 		match node_type:
 			"line":
 				_available_choices.clear()
-				_publish_stable_boundary(dispatch_generation, &"line")
+				_publish_stable_boundary(result_holder, &"line")
 				_complete_dispatch_segment(dispatch_generation)
 				line_requested.emit(
 					StringName(node.get("speaker", "")),
@@ -234,13 +222,13 @@ func _dispatch_until_boundary(publish_failure := true, transaction_state: Dictio
 				var public_items: Array[Dictionary] = []
 				for item: Dictionary in _available_choices:
 					public_items.append({"text":String(item.get("text", ""))})
-				_publish_stable_boundary(dispatch_generation, &"choice")
+				_publish_stable_boundary(result_holder, &"choice")
 				_complete_dispatch_segment(dispatch_generation)
 				choices_requested.emit(public_items.duplicate(true))
 				return OK
 			"end":
 				_checkpoint = {"active":false}
-				_dispatch_checkpoint_by_generation[dispatch_generation] = _checkpoint.duplicate(true)
+				result_holder["checkpoint"] = _checkpoint.duplicate(true)
 				_complete_dispatch_segment(dispatch_generation)
 				_finish_dialogue()
 				return OK
@@ -365,7 +353,7 @@ func _rollback_dispatch_segment(generation: int) -> void:
 func _emit_failure(context: Dictionary) -> void:
 	failed.emit(context.duplicate(true))
 
-func _publish_stable_boundary(dispatch_generation: int, boundary: StringName) -> void:
+func _publish_stable_boundary(result_holder: Dictionary, boundary: StringName) -> void:
 	_checkpoint = {
 		"active":true,
 		"bundle_key":String(_bundle_key),
@@ -373,7 +361,7 @@ func _publish_stable_boundary(dispatch_generation: int, boundary: StringName) ->
 		"node_id":String(current_node_id),
 		"boundary":String(boundary),
 	}
-	_dispatch_checkpoint_by_generation[dispatch_generation] = _checkpoint.duplicate(true)
+	result_holder["checkpoint"] = _checkpoint.duplicate(true)
 
 func _is_string_value(value: Variant) -> bool:
 	return typeof(value) == TYPE_STRING or typeof(value) == TYPE_STRING_NAME
