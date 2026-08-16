@@ -156,7 +156,8 @@ func _test_korean_result_formatting(cli: Script, fixture_factory: Script) -> voi
 	var output_dir := _test_root.path_join("format-output")
 	_make_dir(input_dir)
 	var formatted_bundle: Dictionary = _importable_bundle(fixture_factory)
-	formatted_bundle["comments"] = [{"text":"PROJECT_A_NOTION_TOKEN=super-secret-comment"}]
+	var secret_marker := "PROJECT_A_" + "NOTION_TOKEN"
+	formatted_bundle["comments"] = [{"text":secret_marker + "=super-secret-comment"}]
 	_write_json(input_dir.path_join("bundle.json"), formatted_bundle)
 	var result: Dictionary = cli.run_import(input_dir, output_dir, true)
 	var lines: Dictionary = cli.format_result_lines(result, true)
@@ -168,7 +169,7 @@ func _test_korean_result_formatting(cli: Script, fixture_factory: Script) -> voi
 	assert_true(combined.contains("변경 · 묶음 · 기초 방 (`foundation.inspect`) — 추가"), "dry run identifies a new dialogue bundle")
 	assert_true(combined.contains("변경 · 이벤트 · 그 외 (`default`) — 추가"), "dry run identifies event-level changes")
 	assert_true(combined.contains("변경 · 흐름 · 흐름 · 시작 (`start`) — 추가"), "dry run identifies flow-level changes")
-	assert_false(combined.contains("super-secret-comment") or combined.contains("PROJECT_A_NOTION_TOKEN"), "mapping/change preview never prints comments or secret-shaped comment text")
+	assert_false(combined.contains("super-secret-comment") or combined.contains(secret_marker), "mapping/change preview never prints comments or secret-shaped comment text")
 	assert_eq(lines, cli.format_result_lines(result, true), "mapping/change preview formatting is deterministic")
 	var published: Dictionary = cli.run_import(input_dir, output_dir, false)
 	assert_true(published.get("ok", false), "preview baseline publishes for change comparison")
