@@ -72,6 +72,8 @@ func restore_session(data: Dictionary) -> Error:
 		return ERR_INVALID_DATA
 	if not is_finite(data["play_time_seconds"]) or data["play_time_seconds"] < 0.0:
 		return ERR_INVALID_DATA
+	if not _is_persistable_dictionary(data):
+		return ERR_INVALID_DATA
 	var restored_narrative_state := NarrativeStateResource.new()
 	var restored_world_state := WorldStateResource.new()
 	if restored_narrative_state.restore(data["narrative_state"]) != OK or restored_world_state.restore(data["world_state"]) != OK:
@@ -80,3 +82,25 @@ func restore_session(data: Dictionary) -> Error:
 	world_state = restored_world_state
 	play_time_seconds = data["play_time_seconds"]
 	return OK
+
+func _is_persistable_dictionary(value: Dictionary) -> bool:
+	for key in value:
+		if not _is_persistable_value(key) or not _is_persistable_value(value[key]):
+			return false
+	return true
+
+func _is_persistable_value(value: Variant) -> bool:
+	match typeof(value):
+		TYPE_NIL, TYPE_BOOL, TYPE_INT, TYPE_STRING, TYPE_STRING_NAME:
+			return true
+		TYPE_FLOAT:
+			return is_finite(value)
+		TYPE_ARRAY:
+			for item in value:
+				if not _is_persistable_value(item):
+					return false
+			return true
+		TYPE_DICTIONARY:
+			return _is_persistable_dictionary(value)
+		_:
+			return false

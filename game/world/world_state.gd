@@ -1,7 +1,7 @@
 extends RefCounted
 class_name WorldState
 
-var maps: Dictionary = {}
+var _maps: Dictionary = {}
 
 func set_object(map_id: StringName, object_id: StringName, state: Dictionary) -> Error:
 	var map_key := String(map_id).strip_edges()
@@ -10,24 +10,24 @@ func set_object(map_id: StringName, object_id: StringName, state: Dictionary) ->
 		return ERR_INVALID_PARAMETER
 	if not _is_persistable_dictionary(state):
 		return ERR_INVALID_DATA
-	if not maps.has(map_key):
-		maps[map_key] = {}
-	maps[map_key][object_key] = state.duplicate(true)
+	if not _maps.has(map_key):
+		_maps[map_key] = {}
+	_maps[map_key][object_key] = state.duplicate(true)
 	return OK
 
 func get_object(map_id: StringName, object_id: StringName) -> Dictionary:
 	var map_key := String(map_id).strip_edges()
 	var object_key := String(object_id).strip_edges()
-	if map_key.is_empty() or object_key.is_empty() or not maps.has(map_key):
+	if map_key.is_empty() or object_key.is_empty() or not _maps.has(map_key):
 		return {}
-	var objects: Variant = maps[map_key]
+	var objects: Variant = _maps[map_key]
 	if typeof(objects) != TYPE_DICTIONARY or not objects.has(object_key):
 		return {}
 	var state: Variant = objects[object_key]
 	return state.duplicate(true) if typeof(state) == TYPE_DICTIONARY else {}
 
 func snapshot() -> Dictionary:
-	return {"maps": maps.duplicate(true)}
+	return {"maps": _maps.duplicate(true)}
 
 func restore(data: Dictionary) -> Error:
 	if not data.has("maps") or typeof(data["maps"]) != TYPE_DICTIONARY:
@@ -35,11 +35,11 @@ func restore(data: Dictionary) -> Error:
 	var candidate: Dictionary = data["maps"]
 	if not _is_valid_maps(candidate):
 		return ERR_INVALID_DATA
-	maps = _normalized_maps(candidate)
+	_maps = _normalized_maps(candidate)
 	return OK
 
 func clear() -> void:
-	maps = {}
+	_maps = {}
 
 func _is_valid_maps(candidate: Dictionary) -> bool:
 	var seen_maps := {}

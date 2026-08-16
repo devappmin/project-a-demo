@@ -9,10 +9,17 @@ func run() -> void:
 	if script == null:
 		return
 	var state: Variant = script.new()
+	_test_backing_state_is_private(state)
 	_test_identifiers_and_nesting(state)
 	_test_deep_copy_boundaries(state)
 	_test_round_trip_and_rejections(state)
 	_test_session_replacement(script)
+
+func _test_backing_state_is_private(state: Variant) -> void:
+	var public_property_names := PackedStringArray()
+	for property_data: Dictionary in state.get_property_list():
+		public_property_names.append(property_data["name"])
+	assert_false(&"maps" in public_property_names, "WorldState does not expose its backing dictionary for unvalidated mutation")
 
 func _test_identifiers_and_nesting(state: Variant) -> void:
 	for case_data: Dictionary in [

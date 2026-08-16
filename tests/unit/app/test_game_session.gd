@@ -11,4 +11,15 @@ func run() -> void:
 	assert_false(session.can(GameMode.ACTION_MOVE), "dialogue blocks movement")
 	assert_true(session.can(GameMode.ACTION_DIALOGUE_ADVANCE), "dialogue permits advance")
 	assert_false(session.change_mode(GameMode.Value.BOOT), "runtime cannot return to boot")
+	_test_restore_rejects_live_narrative_values(session)
 	session.free()
+
+func _test_restore_rejects_live_narrative_values(session: GameSessionService) -> void:
+	session.narrative_state.set_flag(&"preserved", true)
+	var before := session.snapshot_session()
+	var invalid_restore := session.snapshot_session()
+	var forbidden_node := Node.new()
+	invalid_restore["narrative_state"]["flags"]["forbidden"] = forbidden_node
+	assert_eq(session.restore_session(invalid_restore), ERR_INVALID_DATA, "session restore rejects live values nested in NarrativeState")
+	assert_eq(session.snapshot_session(), before, "rejected narrative restore preserves the complete session")
+	forbidden_node.free()
