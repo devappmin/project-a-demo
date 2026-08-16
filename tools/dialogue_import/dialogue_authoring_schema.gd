@@ -252,7 +252,7 @@ static func _validate_mappings(value: Variant, condition: bool, catalog: Narrati
 		if typeof(record_value) != TYPE_DICTIONARY:
 			_add_issue(issues, "error", "invalid_mapping", "condition or effect must be a dictionary", context)
 			continue
-		_validate_allowed_fields(record_value, ["source_id", "source_url", "source_text", "term_name", "mapping_status", "kind", "key", "operator", "value", "comments"] if condition else ["source_id", "source_url", "source_text", "term_name", "mapping_status", "kind", "key", "value", "comments"], "invalid_condition" if condition else "invalid_effect", "condition" if condition else "effect", _context(record_value, context), issues)
+		_validate_allowed_fields(record_value, ["source_text", "term_name", "mapping_status", "kind", "key", "operator", "value", "comments"] if condition else ["source_text", "term_name", "mapping_status", "kind", "key", "value", "comments"], "invalid_condition" if condition else "invalid_effect", "condition" if condition else "effect", context, issues)
 		var result := catalog.validate_condition(record_value) if condition and catalog != null else catalog.validate_effect(record_value) if catalog != null else {"ok":false, "code":"invalid_catalog", "message":"narrative catalog is unavailable"}
 		if not result.get("ok", false):
 			_add_issue(issues, "error", String(result.get("code", "invalid_mapping")), String(result.get("message", "mapping is invalid")), context)

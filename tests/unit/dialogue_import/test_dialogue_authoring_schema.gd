@@ -92,7 +92,9 @@ func _test_fail_closed_shapes(schema: Script, fixture: Script, catalog: Narrativ
 	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][2]["blocks"][1]["effects"] = [], "invalid_jump_block")
 	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][0]["blocks"][2]["items"][0]["speaker"] = "retti", "invalid_choice_item")
 	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][0]["conditions"][0]["target_key"] = "start", "invalid_condition")
+	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][0]["conditions"][0]["source_id"] = "mapping-source", "invalid_condition")
 	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["effects"][0]["operator"] = "eq", "invalid_effect")
+	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["effects"][0]["source_id"] = "mapping-source", "invalid_effect")
 
 func _test_same_bundle_cross_trigger_event_target(schema: Script, fixture: Script, characters: Resource) -> void:
 	var bundle: Dictionary = fixture.valid_bundle()
