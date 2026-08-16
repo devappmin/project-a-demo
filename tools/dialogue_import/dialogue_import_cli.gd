@@ -12,11 +12,13 @@ func _initialize() -> void:
 
 func _run() -> void:
 	var args := _get_arguments()
-	var dry_run := "--dry-run" in args
-	var allow_warnings := "--allow-warnings" in args
-	var input_dir := _argument_value(args, "--input-dir", DEFAULT_INPUT_DIR)
-	var output_dir := _argument_value(args, "--output-dir", DEFAULT_OUTPUT_DIR)
-	var result := run_import(input_dir, output_dir, dry_run, allow_warnings)
+	var parsed := _parse_arguments(args)
+	if not parsed.get("ok", false):
+		_present_result(parsed, false)
+		_terminate(1)
+		return
+	var dry_run: bool = parsed["dry_run"]
+	var result := run_import(String(parsed["input_dir"]), String(parsed["output_dir"]), dry_run, bool(parsed["allow_warnings"]))
 	_present_result(result, dry_run)
 	_terminate(exit_code_for(result))
 
@@ -94,6 +96,33 @@ static func format_result_lines(result: Dictionary, dry_run: bool) -> Dictionary
 
 static func exit_code_for(result: Dictionary) -> int:
 	return 0 if bool(result.get("ok", false)) else 1
+
+static func _parse_arguments(args: PackedStringArray) -> Dictionary:
+	var result := {"ok":true, "input_dir":DEFAULT_INPUT_DIR, "output_dir":DEFAULT_OUTPUT_DIR, "dry_run":false, "allow_warnings":false}
+	var seen: Dictionary = {}
+	var index := 0
+	while index < args.size():
+		var option := args[index]
+		if option not in ["--input-dir", "--output-dir", "--dry-run", "--allow-warnings"] or seen.has(option):
+			return _argument_failure()
+		seen[option] = true
+		if option in ["--dry-run", "--allow-warnings"]:
+			result["dry_run" if option == "--dry-run" else "allow_warnings"] = true
+			index += 1
+			continue
+		if index + 1 >= args.size():
+			return _argument_failure()
+		var value := String(args[index + 1])
+		if value.is_empty() or value.begins_with("--"):
+			return _argument_failure()
+		result["input_dir" if option == "--input-dir" else "output_dir"] = value
+		index += 2
+	return result
+
+static func _argument_failure() -> Dictionary:
+	var message := "명령줄 인수가 올바르지 않습니다. 지원되는 옵션과 값을 확인하세요."
+	var issue := {"severity":"error", "code":"invalid_arguments", "message":message, "source_id":"", "source_url":"", "bundle_key":"", "event_key":"", "flow_key":"", "node_id":""}
+	return {"ok":false, "graphs":{}, "events":{}, "source_map":{}, "artifacts":{}, "manifest":{}, "issues":[issue], "counts":{}, "error":ERR_INVALID_PARAMETER, "code":"invalid_arguments", "message":message}
 
 static func _load_bundles(input_dir: String) -> Dictionary:
 	var directory := DirAccess.open(input_dir)
@@ -199,7 +228,3 @@ static func _publish_message(error: Error, recovery: Dictionary) -> String:
 			return "대화 게시를 완료했지만 임시 정리 잔여물이 남았습니다. 확인하세요: %s" % recovery.get("temporary_path", "")
 		_:
 			return "검증된 대화 스냅샷을 게시했습니다."
-
-func _argument_value(args: PackedStringArray, name: String, fallback: String) -> String:
-	var index := args.find(name)
-	return args[index + 1] if index >= 0 and index + 1 < args.size() else fallback

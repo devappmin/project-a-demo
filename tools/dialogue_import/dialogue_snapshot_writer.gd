@@ -12,10 +12,17 @@ func _init(transaction_observer: Callable = Callable()) -> void:
 	_transaction_observer = transaction_observer
 
 func replace_snapshot(output_dir: String, graphs: Dictionary, manifest: Dictionary) -> Error:
+	last_recovery = {}
 	var artifacts := {}
+	var filename_identities := {}
 	for scene_key_value: Variant in graphs:
 		var scene_key := String(scene_key_value)
-		artifacts[scene_key.replace(".", "_") + ".json"] = graphs[scene_key_value]
+		var filename := scene_key.replace(".", "_") + ".json"
+		var filename_identity := filename.to_lower()
+		if filename_identities.has(filename_identity):
+			return ERR_ALREADY_EXISTS
+		filename_identities[filename_identity] = true
+		artifacts[filename] = graphs[scene_key_value]
 	return replace_artifacts(output_dir, artifacts, manifest)
 
 func replace_artifacts(output_dir: String, artifacts: Dictionary, manifest: Dictionary) -> Error:
@@ -272,7 +279,8 @@ func _is_safe_artifact_filename(filename: String) -> bool:
 	var base_name := filename.trim_suffix(".json")
 	if base_name.is_empty() or base_name.to_lower() == "manifest":
 		return false
-	if base_name.to_upper() in ["CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"]:
+	var device_stem := base_name.get_slice(".", 0).to_upper()
+	if device_stem in ["CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"]:
 		return false
 	for index: int in filename.length():
 		var code := filename.unicode_at(index)

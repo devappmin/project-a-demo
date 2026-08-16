@@ -202,6 +202,43 @@ func _test_process_exit_seams(fixture_factory: Script) -> void:
 	warning_harness._run()
 	assert_eq(warning_harness.captured_exit_code, 1, "production _run terminates nonzero for unconfirmed warnings")
 	warning_harness.free()
+	_test_malformed_argument_rejection(harness_script, valid_dir)
+
+func _test_malformed_argument_rejection(harness_script: Script, valid_dir: String) -> void:
+	var cases := [
+		{"name":"missing value"},
+		{"name":"flag-shaped value"},
+		{"name":"unknown option"},
+		{"name":"duplicate value option"},
+		{"name":"duplicate boolean option"},
+	]
+	var case_index := 0
+	for case_value: Variant in cases:
+		var case_data: Dictionary = case_value
+		var output_dir := _test_root.path_join("malformed-args-%d" % case_index)
+		var args := PackedStringArray()
+		match String(case_data["name"]):
+			"missing value":
+				args = PackedStringArray(["--output-dir", output_dir, "--input-dir"])
+			"flag-shaped value":
+				args = PackedStringArray(["--input-dir", "--dry-run", "--output-dir", output_dir])
+			"unknown option":
+				args = PackedStringArray(["--input-dir", valid_dir, "--output-dir", output_dir, "--unknown=super-secret-cli-value"])
+			"duplicate value option":
+				args = PackedStringArray(["--input-dir", valid_dir, "--input-dir", valid_dir, "--output-dir", output_dir])
+			"duplicate boolean option":
+				args = PackedStringArray(["--input-dir", valid_dir, "--output-dir", output_dir, "--dry-run", "--dry-run"])
+		var harness: SceneTree = harness_script.new()
+		harness.install(args)
+		harness._run()
+		assert_eq(harness.captured_exit_code, 1, "%s exits nonzero before import" % case_data["name"])
+		assert_eq(harness.captured_result.get("code"), "invalid_arguments", "%s has a stable argument diagnostic" % case_data["name"])
+		var combined := "\n".join(harness.captured_lines.get("stdout", [])) + "\n" + "\n".join(harness.captured_lines.get("stderr", []))
+		assert_true(combined.contains("명령줄 인수가 올바르지 않습니다"), "%s reports a Korean argument diagnostic" % case_data["name"])
+		assert_false(combined.contains("super-secret-cli-value"), "%s does not echo arbitrary argument values" % case_data["name"])
+		assert_false(DirAccess.dir_exists_absolute(ProjectSettings.globalize_path(output_dir)), "%s cannot publish any output" % case_data["name"])
+		harness.free()
+		case_index += 1
 
 func _has_issue(result: Dictionary, code: String) -> bool:
 	for issue_value: Variant in result.get("issues", []):

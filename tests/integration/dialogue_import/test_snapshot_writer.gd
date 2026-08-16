@@ -5,6 +5,7 @@ const WRITER_PATH := "res://tools/dialogue_import/dialogue_snapshot_writer.gd"
 var _scenario := ""
 var _test_root := ""
 var _observer_error: Error = OK
+var _observer_calls := 0
 
 func run() -> void:
 	_test_root = "user://test-output/snapshot-writer-%s" % Time.get_ticks_usec()
@@ -25,6 +26,7 @@ func run() -> void:
 	_test_unsafe_artifact_names_fail_closed(writer_script)
 	_test_manifest_mismatch_fails_closed(writer_script)
 	_test_legacy_snapshot_wrapper(writer_script)
+	_test_legacy_snapshot_wrapper_collision(writer_script)
 	_cleanup_exact_test_root()
 
 func _test_successful_atomic_replacement(writer_script: Variant) -> void:
@@ -158,11 +160,13 @@ func _test_empty_payload_fails_closed(writer_script: Variant) -> void:
 	assert_eq(_snapshot_bytes(state["temporary"]), {}, "empty writer payload creates no temporary transaction")
 
 func _test_unsafe_artifact_names_fail_closed(writer_script: Variant) -> void:
-	for filename: String in ["manifest.json", "nested/graph.json", "bad:name.json", "graph.txt", "CON.json"]:
+	for filename: String in ["manifest.json", "nested/graph.json", "bad:name.json", "graph.txt", "CON.json", "CON.extra.json", "com1.backup.json"]:
 		var state := _setup_previous("unsafe-" + filename.replace("/", "_").replace(":", "_"))
-		var writer: Variant = writer_script.new()
+		_observer_calls = 0
+		var writer: Variant = writer_script.new(Callable(self, "_transaction_observer"))
 		var payload := _payload_for_artifacts({filename:{"schema_version":1}})
 		assert_eq(writer.replace_artifacts(state["output"], payload["artifacts"], payload["manifest"]), ERR_INVALID_PARAMETER, "writer rejects unsafe artifact filename %s" % filename)
+		assert_eq(_observer_calls, 0, "writer rejects unsafe artifact filename %s before staging begins" % filename)
 		assert_eq(_snapshot_bytes(state["output"]), state["before"], "unsafe artifact filename %s preserves current bytes" % filename)
 		assert_eq(_snapshot_bytes(state["temporary"]), {}, "unsafe artifact filename %s creates no temporary sibling" % filename)
 	var collision_state := _setup_previous("writer-collision")
@@ -188,7 +192,28 @@ func _test_legacy_snapshot_wrapper(writer_script: Variant) -> void:
 	assert_eq(writer.replace_snapshot(state["output"], {"foundation.inspect":graph}, manifest), OK, "legacy graph wrapper remains source-compatible until migration removes the old CLI")
 	assert_eq(FileAccess.get_file_as_string(state["output"].path_join("foundation_inspect.json")), graph_json, "legacy wrapper publishes the same stable graph bytes")
 
+func _test_legacy_snapshot_wrapper_collision(writer_script: Variant) -> void:
+	var state := _setup_previous("legacy-wrapper-collision")
+	var first_graph := {"schema_version":1, "scene_key":"a.b", "entry_node":"first", "nodes":{"first":{"type":"end"}}}
+	var second_graph := {"schema_version":1, "scene_key":"a_b", "entry_node":"second", "nodes":{"second":{"type":"end"}}}
+	var graphs := {}
+	graphs["a.b"] = first_graph
+	graphs["a_b"] = second_graph
+	var second_json := JSON.stringify(second_graph, "\t", true, true)
+	var manifest := {"schema_version":1, "generated_at":"2026-08-16T00:00:00Z", "files":{"a_b.json":second_json.sha256_text()}, "scenes":["a.b", "a_b"]}
+	var writer: Variant = writer_script.new()
+	assert_eq(writer.replace_snapshot(state["output"], graphs, manifest), ERR_ALREADY_EXISTS, "legacy wrapper rejects scene keys that collapse to the same generated filename")
+	assert_eq(_snapshot_bytes(state["output"]), state["before"], "legacy wrapper collision preserves the current snapshot byte-for-byte")
+	assert_eq(_snapshot_bytes(state["temporary"]), {}, "legacy wrapper collision creates no transaction residue")
+	var case_state := _setup_previous("legacy-wrapper-case-collision")
+	var case_graphs := {}
+	case_graphs["A.B"] = first_graph
+	case_graphs["a_b"] = second_graph
+	assert_eq(writer_script.new().replace_snapshot(case_state["output"], case_graphs, {"schema_version":1, "files":{}}), ERR_ALREADY_EXISTS, "legacy wrapper rejects case-insensitive generated filename collisions")
+	assert_eq(_snapshot_bytes(case_state["output"]), case_state["before"], "case-insensitive legacy wrapper collision preserves current bytes")
+
 func _transaction_observer(stage: String, paths_value: Variant) -> void:
+	_observer_calls += 1
 	if typeof(paths_value) != TYPE_DICTIONARY:
 		return
 	var paths: Dictionary = paths_value
