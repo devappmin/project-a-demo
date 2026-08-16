@@ -11,20 +11,6 @@ var _transaction_observer: Callable
 func _init(transaction_observer: Callable = Callable()) -> void:
 	_transaction_observer = transaction_observer
 
-func replace_snapshot(output_dir: String, graphs: Dictionary, manifest: Dictionary) -> Error:
-	last_recovery = {}
-	var artifacts := {}
-	var filename_identities := {}
-	for scene_key_value: Variant in graphs:
-		var scene_key := String(scene_key_value)
-		var filename := scene_key.replace(".", "_") + ".json"
-		var filename_identity := filename.to_lower()
-		if filename_identities.has(filename_identity):
-			return ERR_ALREADY_EXISTS
-		filename_identities[filename_identity] = true
-		artifacts[filename] = graphs[scene_key_value]
-	return replace_artifacts(output_dir, artifacts, manifest)
-
 func replace_artifacts(output_dir: String, artifacts: Dictionary, manifest: Dictionary) -> Error:
 	last_recovery = {}
 	var normalized_output := output_dir.simplify_path()

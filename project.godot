@@ -64,10 +64,6 @@ window/stretch/mode="canvas_items"
 window/stretch/aspect="keep"
 window/stretch/scale_mode="integer"
 
-[editor_plugins]
-
-enabled=PackedStringArray("res://tools/notion_sync/plugin.cfg")
-
 [physics]
 
 3d/physics_engine="Jolt Physics"

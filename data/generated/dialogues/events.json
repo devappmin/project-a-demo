@@ -1,0 +1,28 @@
+{
+	"bundles": {
+		"foundation.inspect": {
+			"triggers": {
+				"mirror.inspect": [
+					{
+						"conditions": [
+							{
+								"key": "mirror_seen",
+								"kind": "flag",
+								"operator": "eq",
+								"value": true
+							}
+						],
+						"entry_node": "seen.start.line_2bcbc5c5b2cb",
+						"event_key": "seen"
+					},
+					{
+						"conditions": [],
+						"entry_node": "default.start.line_1d0c644205ee",
+						"event_key": "default"
+					}
+				]
+			}
+		}
+	},
+	"schema_version": 1
+}

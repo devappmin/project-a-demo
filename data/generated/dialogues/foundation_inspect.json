@@ -1,13 +1,106 @@
 {
-  "schema_version": 1,
-  "scene_key": "foundation.inspect",
-  "entry_node": "line_1",
-  "nodes": {
-    "line_1": {"type":"line", "speaker":"retti", "expression":"uneasy", "text":"낯선 거울이다.", "next":"choice_1"},
-    "choice_1": {"type":"choice", "items":[
-      {"text":"자세히 본다", "conditions":[], "effects":[{"kind":"flag_set", "key":"mirror_seen", "value":true}], "next":"end_1"},
-      {"text":"뒤로 물러난다", "conditions":[], "effects":[], "next":"end_1"}
-    ]},
-    "end_1": {"type":"end"}
-  }
+	"entry_node": "seen.start.line_2bcbc5c5b2cb",
+	"nodes": {
+		"default.hesitate.jump_b3173f01921d": {
+			"next": "default.rejoin.line_836876b3931a",
+			"type": "jump"
+		},
+		"default.hesitate.line_37cc52273716": {
+			"expression": "uneasy",
+			"next": "default.hesitate.jump_b3173f01921d",
+			"speaker": "retti",
+			"text": "지금은 가까이 가지 않는 편이 좋을지도 몰라.",
+			"type": "line"
+		},
+		"default.inspect.choice_e5adbac80116": {
+			"items": [
+				{
+					"conditions": [],
+					"effects": [],
+					"next": "default.start.line_1d0c644205ee",
+					"text": "처음부터 다시 생각한다"
+				},
+				{
+					"conditions": [],
+					"effects": [],
+					"next": "default.rejoin.line_836876b3931a",
+					"text": "조사를 마친다"
+				}
+			],
+			"type": "choice"
+		},
+		"default.inspect.line_06c0a3811e59": {
+			"expression": "uneasy",
+			"next": "default.inspect.line_3ba3be09617e",
+			"speaker": "retti",
+			"text": "거울 속에는 이 방과 조금 다른 방이 비친다.",
+			"type": "line"
+		},
+		"default.inspect.line_3ba3be09617e": {
+			"expression": "neutral",
+			"next": "default.inspect.choice_e5adbac80116",
+			"speaker": "retti",
+			"text": "조금 더 살펴볼까?",
+			"type": "line"
+		},
+		"default.rejoin.end_d8a8af5fbf3b": {
+			"type": "end"
+		},
+		"default.rejoin.line_836876b3931a": {
+			"expression": "neutral",
+			"next": "default.rejoin.end_d8a8af5fbf3b",
+			"speaker": "retti",
+			"text": "거울은 다시 조용해졌다.",
+			"type": "line"
+		},
+		"default.start.choice_4c348c8a3303": {
+			"items": [
+				{
+					"conditions": [],
+					"effects": [
+						{
+							"key": "mirror_seen",
+							"kind": "flag_set",
+							"value": true
+						}
+					],
+					"next": "default.inspect.line_06c0a3811e59",
+					"text": "거울을 자세히 본다"
+				},
+				{
+					"conditions": [],
+					"effects": [],
+					"next": "default.hesitate.line_37cc52273716",
+					"text": "한 걸음 물러난다"
+				}
+			],
+			"type": "choice"
+		},
+		"default.start.line_1d0c644205ee": {
+			"expression": "neutral",
+			"next": "default.start.line_bd4f1d6314f3",
+			"speaker": "retti",
+			"text": "낯선 거울이다.",
+			"type": "line"
+		},
+		"default.start.line_bd4f1d6314f3": {
+			"expression": "uneasy",
+			"next": "default.start.choice_4c348c8a3303",
+			"speaker": "retti",
+			"text": "표면 안쪽에서 희미한 빛이 흔들린다.",
+			"type": "line"
+		},
+		"seen.start.end_366d92c719eb": {
+			"type": "end"
+		},
+		"seen.start.line_2bcbc5c5b2cb": {
+			"expression": "neutral",
+			"next": "seen.start.end_366d92c719eb",
+			"speaker": "retti",
+			"text": "아까보다 평범한 거울처럼 보인다.",
+			"type": "line"
+		}
+	},
+	"scene_key": "foundation.inspect",
+	"schema_version": 1
 }

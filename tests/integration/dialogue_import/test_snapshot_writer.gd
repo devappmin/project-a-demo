@@ -25,8 +25,6 @@ func run() -> void:
 	_test_empty_payload_fails_closed(writer_script)
 	_test_unsafe_artifact_names_fail_closed(writer_script)
 	_test_manifest_mismatch_fails_closed(writer_script)
-	_test_legacy_snapshot_wrapper(writer_script)
-	_test_legacy_snapshot_wrapper_collision(writer_script)
 	_cleanup_exact_test_root()
 
 func _test_successful_atomic_replacement(writer_script: Variant) -> void:
@@ -182,35 +180,6 @@ func _test_manifest_mismatch_fails_closed(writer_script: Variant) -> void:
 	assert_eq(writer.replace_artifacts(state["output"], payload["artifacts"], payload["manifest"]), ERR_FILE_CORRUPT, "writer rejects a manifest hash that does not match stable artifact bytes")
 	assert_eq(_snapshot_bytes(state["output"]), state["before"], "manifest hash mismatch preserves the current snapshot byte-for-byte")
 	assert_eq(_snapshot_bytes(state["temporary"]), {}, "manifest hash mismatch creates no transaction residue")
-
-func _test_legacy_snapshot_wrapper(writer_script: Variant) -> void:
-	var state := _setup_previous("legacy-wrapper")
-	var graph := {"schema_version":1, "scene_key":"foundation.inspect", "entry_node":"end1", "nodes":{"end1":{"type":"end"}}}
-	var graph_json := JSON.stringify(graph, "\t", true, true)
-	var manifest := {"schema_version":1, "generated_at":"2026-08-16T00:00:00Z", "files":{"foundation_inspect.json":graph_json.sha256_text()}, "scenes":["foundation.inspect"]}
-	var writer: Variant = writer_script.new()
-	assert_eq(writer.replace_snapshot(state["output"], {"foundation.inspect":graph}, manifest), OK, "legacy graph wrapper remains source-compatible until migration removes the old CLI")
-	assert_eq(FileAccess.get_file_as_string(state["output"].path_join("foundation_inspect.json")), graph_json, "legacy wrapper publishes the same stable graph bytes")
-
-func _test_legacy_snapshot_wrapper_collision(writer_script: Variant) -> void:
-	var state := _setup_previous("legacy-wrapper-collision")
-	var first_graph := {"schema_version":1, "scene_key":"a.b", "entry_node":"first", "nodes":{"first":{"type":"end"}}}
-	var second_graph := {"schema_version":1, "scene_key":"a_b", "entry_node":"second", "nodes":{"second":{"type":"end"}}}
-	var graphs := {}
-	graphs["a.b"] = first_graph
-	graphs["a_b"] = second_graph
-	var second_json := JSON.stringify(second_graph, "\t", true, true)
-	var manifest := {"schema_version":1, "generated_at":"2026-08-16T00:00:00Z", "files":{"a_b.json":second_json.sha256_text()}, "scenes":["a.b", "a_b"]}
-	var writer: Variant = writer_script.new()
-	assert_eq(writer.replace_snapshot(state["output"], graphs, manifest), ERR_ALREADY_EXISTS, "legacy wrapper rejects scene keys that collapse to the same generated filename")
-	assert_eq(_snapshot_bytes(state["output"]), state["before"], "legacy wrapper collision preserves the current snapshot byte-for-byte")
-	assert_eq(_snapshot_bytes(state["temporary"]), {}, "legacy wrapper collision creates no transaction residue")
-	var case_state := _setup_previous("legacy-wrapper-case-collision")
-	var case_graphs := {}
-	case_graphs["A.B"] = first_graph
-	case_graphs["a_b"] = second_graph
-	assert_eq(writer_script.new().replace_snapshot(case_state["output"], case_graphs, {"schema_version":1, "files":{}}), ERR_ALREADY_EXISTS, "legacy wrapper rejects case-insensitive generated filename collisions")
-	assert_eq(_snapshot_bytes(case_state["output"]), case_state["before"], "case-insensitive legacy wrapper collision preserves current bytes")
 
 func _transaction_observer(stage: String, paths_value: Variant) -> void:
 	_observer_calls += 1

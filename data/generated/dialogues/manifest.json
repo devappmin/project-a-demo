@@ -1,1 +1,12 @@
-{"schema_version":1,"generated_at":"2026-08-09T00:00:00Z","source":"local_fixture","scenes":["foundation.inspect"]}
+{
+	"bundles": [
+		"foundation.inspect"
+	],
+	"files": {
+		"events.json": "7a32c1a61457183e45d1de4246a3919e6642d905d71a0e1b6be6f18838496dbb",
+		"foundation_inspect.json": "7702dc5daa01eaef7a389b4ab628df6ea0fc182703123adde1e602fd3dd23a43",
+		"source_map.json": "c4c424671900cbb8b69103cef7dfc92b3458df5243dca0679cbb9e550fc990f9"
+	},
+	"generated_at": "2026-08-16T03:38:46Z",
+	"schema_version": 1
+}

@@ -1,0 +1,178 @@
+{
+	"schema_version": 1,
+	"sources": [
+		{
+			"key": "choice_4c348c8a3303",
+			"kind": "block",
+			"node_id": "default.start.choice_4c348c8a3303",
+			"source_id": "notion-choice-default",
+			"source_url": "https://www.notion.so/foundation-inspect"
+		},
+		{
+			"key": "choice_1a2a00dd5c82",
+			"kind": "choice",
+			"node_id": "default.inspect.choice_e5adbac80116",
+			"source_id": "notion-choice-finish-inspect",
+			"source_url": "https://www.notion.so/foundation-inspect"
+		},
+		{
+			"key": "choice_ebb8c0c17085",
+			"kind": "choice",
+			"node_id": "default.start.choice_4c348c8a3303",
+			"source_id": "notion-choice-inspect",
+			"source_url": "https://www.notion.so/foundation-inspect"
+		},
+		{
+			"key": "choice_e5adbac80116",
+			"kind": "block",
+			"node_id": "default.inspect.choice_e5adbac80116",
+			"source_id": "notion-choice-inspect-next",
+			"source_url": "https://www.notion.so/foundation-inspect"
+		},
+		{
+			"key": "choice_78058a72ab19",
+			"kind": "choice",
+			"node_id": "default.inspect.choice_e5adbac80116",
+			"source_id": "notion-choice-return-start",
+			"source_url": "https://www.notion.so/foundation-inspect"
+		},
+		{
+			"key": "choice_0b2ad1a2df3e",
+			"kind": "choice",
+			"node_id": "default.start.choice_4c348c8a3303",
+			"source_id": "notion-choice-step-back",
+			"source_url": "https://www.notion.so/foundation-inspect"
+		},
+		{
+			"key": "end_d8a8af5fbf3b",
+			"kind": "block",
+			"node_id": "default.rejoin.end_d8a8af5fbf3b",
+			"source_id": "notion-end-default",
+			"source_url": "https://www.notion.so/foundation-inspect"
+		},
+		{
+			"key": "end_366d92c719eb",
+			"kind": "block",
+			"node_id": "seen.start.end_366d92c719eb",
+			"source_id": "notion-end-seen",
+			"source_url": "https://www.notion.so/foundation-inspect"
+		},
+		{
+			"key": "default",
+			"kind": "event",
+			"node_id": "default.start.line_1d0c644205ee",
+			"source_id": "notion-event-mirror-default",
+			"source_url": "https://www.notion.so/foundation-inspect"
+		},
+		{
+			"key": "seen",
+			"kind": "event",
+			"node_id": "seen.start.line_2bcbc5c5b2cb",
+			"source_id": "notion-event-mirror-seen",
+			"source_url": "https://www.notion.so/foundation-inspect"
+		},
+		{
+			"key": "start",
+			"kind": "flow",
+			"node_id": "default.start.line_1d0c644205ee",
+			"source_id": "notion-flow-default-start",
+			"source_url": "https://www.notion.so/foundation-inspect"
+		},
+		{
+			"key": "hesitate",
+			"kind": "flow",
+			"node_id": "default.hesitate.line_37cc52273716",
+			"source_id": "notion-flow-hesitate",
+			"source_url": "https://www.notion.so/foundation-inspect"
+		},
+		{
+			"key": "inspect",
+			"kind": "flow",
+			"node_id": "default.inspect.line_06c0a3811e59",
+			"source_id": "notion-flow-inspect",
+			"source_url": "https://www.notion.so/foundation-inspect"
+		},
+		{
+			"key": "rejoin",
+			"kind": "flow",
+			"node_id": "default.rejoin.line_836876b3931a",
+			"source_id": "notion-flow-rejoin",
+			"source_url": "https://www.notion.so/foundation-inspect"
+		},
+		{
+			"key": "start",
+			"kind": "flow",
+			"node_id": "seen.start.line_2bcbc5c5b2cb",
+			"source_id": "notion-flow-seen-start",
+			"source_url": "https://www.notion.so/foundation-inspect"
+		},
+		{
+			"key": "jump_b3173f01921d",
+			"kind": "block",
+			"node_id": "default.hesitate.jump_b3173f01921d",
+			"source_id": "notion-jump-hesitate-rejoin",
+			"source_url": "https://www.notion.so/foundation-inspect"
+		},
+		{
+			"key": "line_1d0c644205ee",
+			"kind": "block",
+			"node_id": "default.start.line_1d0c644205ee",
+			"source_id": "notion-line-default-01",
+			"source_url": "https://www.notion.so/foundation-inspect"
+		},
+		{
+			"key": "line_bd4f1d6314f3",
+			"kind": "block",
+			"node_id": "default.start.line_bd4f1d6314f3",
+			"source_id": "notion-line-default-02",
+			"source_url": "https://www.notion.so/foundation-inspect"
+		},
+		{
+			"key": "line_37cc52273716",
+			"kind": "block",
+			"node_id": "default.hesitate.line_37cc52273716",
+			"source_id": "notion-line-hesitate-01",
+			"source_url": "https://www.notion.so/foundation-inspect"
+		},
+		{
+			"key": "line_06c0a3811e59",
+			"kind": "block",
+			"node_id": "default.inspect.line_06c0a3811e59",
+			"source_id": "notion-line-inspect-01",
+			"source_url": "https://www.notion.so/foundation-inspect"
+		},
+		{
+			"key": "line_3ba3be09617e",
+			"kind": "block",
+			"node_id": "default.inspect.line_3ba3be09617e",
+			"source_id": "notion-line-inspect-02",
+			"source_url": "https://www.notion.so/foundation-inspect"
+		},
+		{
+			"key": "line_836876b3931a",
+			"kind": "block",
+			"node_id": "default.rejoin.line_836876b3931a",
+			"source_id": "notion-line-rejoin-01",
+			"source_url": "https://www.notion.so/foundation-inspect"
+		},
+		{
+			"key": "line_2bcbc5c5b2cb",
+			"kind": "block",
+			"node_id": "seen.start.line_2bcbc5c5b2cb",
+			"source_id": "notion-line-seen-01",
+			"source_url": "https://www.notion.so/foundation-inspect"
+		},
+		{
+			"key": "foundation.inspect",
+			"kind": "bundle",
+			"source_id": "notion-page-foundation-inspect",
+			"source_url": "https://www.notion.so/foundation-inspect"
+		},
+		{
+			"key": "mirror.inspect",
+			"kind": "trigger",
+			"source_id": "notion-trigger-mirror-inspect",
+			"source_url": "https://www.notion.so/foundation-inspect"
+		}
+	]
+}

@@ -142,7 +142,7 @@ func _test_foundation_room_contract() -> void:
 	if mirror == null:
 		room.free()
 		return
-	assert_eq(mirror.get_interaction().payload, {"scene_key":&"foundation.inspect"}, "sample inspectable defers normal entry to the compiled graph")
+	assert_eq(mirror.get_interaction().payload, {"dialogue_bundle_key":&"foundation.inspect", "dialogue_trigger_key":&"mirror.inspect"}, "sample inspectable resolves its document bundle and trigger")
 	room.free()
 
 	var app_scene := load("res://app/bootstrap/app_root.tscn") as PackedScene

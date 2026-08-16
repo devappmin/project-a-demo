@@ -1,99 +1,142 @@
-# 대화 작성 가이드
+# 문서형 대화 작성 가이드
 
-이 문서는 코드를 열지 않고 Notion에서 대사를 쓰는 사람을 위한 안내서입니다. 평소에는 `Text`, `flow`, `order`, `type`, `speaker`, `expression`, `target_flow`만 보면 됩니다. 이름에 `_json`이 붙은 칸은 개발자와 합의한 때에만 건드리세요.
+이 가이드는 사용자와 디자이너가 Notion에서 함께 대사와 분기를 작성하고, 필요할 때 Codex 또는 Claude로 게임 데이터에 반영하는 방법을 설명합니다. 작성 중에는 한국어 본문과 Notion 기본 기능만 사용합니다. 영어 ID, 순서 숫자 칸, 데이터베이스 관계, JSON은 작성자가 관리하지 않습니다.
 
-## 작업할 곳
+## 페이지 하나가 대화 묶음 하나입니다
 
-- [Dialogue Scenes 검색](https://www.notion.so/search?q=Dialogue%20Scenes): 장면의 이름, 상태, 시작 흐름을 정합니다.
-- [Dialogue Blocks 검색](https://www.notion.so/search?q=Dialogue%20Blocks): 실제 대사와 선택지를 순서대로 씁니다.
-- [Characters 검색](https://www.notion.so/search?q=Characters): 캐릭터 키와 사용할 수 있는 표정을 확인합니다.
+장소 하나 또는 서로 긴밀한 이야기 묶음 하나를 일반 Notion 페이지 하나에 작성합니다. 예를 들면 `젤리뽀의 집`, `학교 본관`, `숲 입구`가 각각 한 페이지입니다. 같은 장소의 입장 대화, 인물 대화, 물건 조사는 한 페이지 안에서 트리거로 나눕니다. 문서가 너무 커져 독립적인 이야기로 읽히는 경우에만 새 페이지로 분리합니다.
 
-링크는 데이터베이스 ID나 인증 정보를 문서에 남기지 않도록 이름 검색으로 열립니다. 검색 결과에서 Project A 기획안 아래의 같은 이름 데이터베이스를 선택하세요.
+페이지 안에서는 다음 제목 계층을 지킵니다.
 
-`foundation.inspect` 장면에는 작성 예시가 준비되어 있습니다. 장면 안의 연결된 블록 표는 현재 장면만 보여 주며, `flow`별로 묶고 `order` 오름차순으로 정렬되어 있습니다. 로직용 JSON 칸은 기본 보기에서 숨겨져 있습니다.
+1. 제목 1: `트리거 · <이름>` — 언제 또는 무엇과 상호작용했는지
+2. 제목 2: `이벤트 · <이름>` — 같은 트리거에서 조건에 따라 선택될 후보
+3. 제목 3: `흐름 · <이름>` — 실제 대사와 선택지로 이어지는 평평한 흐름
 
-> Notion API 제약 때문에 이 예시를 새 장면용 데이터베이스 템플릿으로 바꾸는 일은 Notion 화면에서 한 번 수동으로 해야 합니다. 템플릿 메뉴에서 `foundation.inspect`의 연결된 블록 보기 구성을 복제하고, 필터의 `scene`을 새 템플릿 페이지로 지정하세요.
+모든 이벤트는 `흐름 · 시작`을 하나 가집니다. 분기는 중첩 들여쓰기로 길게 만들지 않고, 이름 붙인 흐름을 같은 깊이에 나열한 뒤 화살표로 연결합니다.
 
-## 가장 자주 쓰는 작성 흐름
+## 이벤트 우선순위
 
-1. `Dialogue Scenes`에서 장면을 새로 만들고 `scene_key`를 `chapter.place.event`처럼 겹치지 않게 적습니다.
-2. 처음에는 `status`를 `Draft`로 둡니다. `start_flow`에는 보통 `main`을 적습니다.
-3. 장면 페이지의 연결된 `Dialogue Blocks` 표에서 새 줄을 추가합니다. `scene`은 현재 장면, `flow`는 `main`, `type`은 `line`을 고릅니다.
-4. `Text`에 대사를 쓰고, `speaker`와 `expression`을 고릅니다. `expression`은 `Characters`의 해당 캐릭터에 등록된 값만 사용합니다.
-5. 같은 흐름 안의 순서는 `order` 숫자로 정합니다. 줄을 옮길 때는 행을 끌어놓기보다 `order`를 바꾸세요. 예를 들어 10, 20, 30처럼 간격을 두면 중간에 15를 쉽게 넣을 수 있습니다.
-6. 마지막 `line`이 다른 흐름으로 가야 하면 `target_flow`에 그 흐름 이름을 적습니다. 같은 흐름의 다음 줄로 이어질 때는 비워도 됩니다.
-7. 작성 중에는 Godot의 `Notion Dialogue Sync` 패널에서 `Dry Run`을 눌러 확인합니다. 오류 행을 더블클릭하면 문제가 있는 Notion 원문이 열립니다.
+한 트리거의 이벤트는 문서 위에서 아래 순서로 검사하며, 조건이 모두 맞는 첫 이벤트 하나만 실행합니다. 구체적인 이벤트를 위에 두고, 필요하면 조건 없는 `이벤트 · 그 외`를 맨 아래에 둡니다.
 
-## 선택지 만들기
+`그 외`는 선택 사항입니다. 없으면 어떤 이벤트도 맞지 않을 때 대화가 시작되지 않으며, 가져오기 미리보기에 경고가 표시됩니다. 별도의 우선순위 숫자는 쓰지 않습니다. 이벤트 순서를 바꾸려면 제목과 그 아래 내용을 통째로 위아래로 옮깁니다.
 
-선택지가 나타날 위치에 같은 `flow`를 가진 `choice` 행을 연속으로 만듭니다. 한 행이 선택지 한 개입니다.
+## 대사, 선택지, 이동, 끝
 
-| order | type | Text | target_flow |
-|---:|---|---|---|
-| 10 | choice | 자세히 본다 | inspect |
-| 20 | choice | 뒤로 물러난다 | leave |
+대사는 일반 문단에 다음처럼 씁니다.
 
-두 행 사이에 다른 `type`을 넣지 마세요. 각 `target_flow`와 같은 이름의 흐름을 아래에 만들고, 그 흐름의 첫 행부터 결과 대사를 이어 씁니다. 선택 조건이나 선택 직후의 효과가 필요하면 `notes`에 평문으로 “mirror_seen이 참일 때만”, “선택하면 mirror_seen을 참으로”처럼 적고 개발자에게 전달하세요. 개발자가 확인한 뒤 숨겨진 `conditions_json` 또는 `effects_json`을 채웁니다.
+```text
+레티 [경계]: 그 열쇠는 어디서 났어?
+젤리뽀 [당황]: 그건 말하기 어렵다뽀…
+```
 
-`foundation.inspect`에는 별도 `effect` 노드로 `flag_set mirror_seen=true`를 적용하는 예가 있습니다. 장면의 끝에는 `type=end` 행을 두세요.
+캐릭터 이름과 표정은 한국어로 씁니다. 사용할 수 있는 캐릭터·표정·조건·결과 용어는 [서사 상태·대화 용어 참고서](narrative-state-reference.md)에서 확인합니다. 원하는 표정이나 상태가 참고서에 없으면 비슷한 말을 임의로 만들지 말고 개발자와 먼저 등록 여부를 정합니다.
 
-## 표정 고르기
+선택지는 `선택지` 문단 아래 글머리표로 적습니다.
 
-먼저 `Characters`에서 캐릭터의 `expressions` 목록을 확인한 뒤 블록의 `expression`에서 같은 값을 선택합니다. 원하는 표정이 목록에 없다면 임의 문자열을 만들지 말고 `notes`에 필요한 표정을 적어 개발자에게 요청하세요. `default_expression`은 표정을 새로 정할 때 참고하는 기본값이며, 대사 행의 빈 `expression`을 자동으로 대신하지는 않습니다.
+```text
+선택지
+- 열쇠를 보여준다 → 고백
+- 주머니에 숨긴다 → 숨김
+```
 
-## Draft → Review → Final
+같은 이벤트 안의 다른 흐름으로 이동할 때는 `→ 고백`처럼 흐름 이름만 씁니다. 같은 페이지의 다른 이벤트로 이동할 때는 별도 줄에 `→ 이벤트 · 진실 대면`처럼 씁니다. 다른 페이지로 직접 점프하지 않습니다. 대신 필요한 결과를 남기고 현재 이벤트를 끝낸 뒤, 다음 상호작용에서 그 상태에 맞는 이벤트가 선택되게 합니다.
 
-- `Draft`: 자유롭게 쓰는 단계입니다. 표정 경고가 있어도 Dry Run 결과를 만들 수 있습니다.
-- `Review`: 문장과 분기 흐름을 함께 검토하는 단계입니다. 경고는 보이지만 동기화를 막지는 않습니다.
-- `Final`: 게임에 넣을 준비가 끝난 단계입니다. 경고 하나라도 있으면 동기화를 막습니다.
+플레이어 조작으로 돌아가는 경로는 별도 줄에 `끝`이라고 적습니다. 모든 경로는 다음 대사, 선택지, 흐름 이동, 이벤트 이동 또는 `끝`으로 이어져야 합니다.
 
-`Draft`에서 바로 `Final`로 올리지 마세요. 먼저 `Review`로 바꾸고 `Dry Run`을 통과한 뒤, 캐릭터 표정과 모든 선택지 목적지를 확인하고 `Final`로 올립니다.
+선택 뒤에는 대사를 여러 문단 이어 쓸 수 있고, 그 뒤에 다시 선택지를 둘 수 있습니다. 앞 흐름으로 돌아가거나 여러 흐름을 하나로 합치는 것도 가능합니다.
 
-## 동기화하기
+## 발생·조건·결과는 인용 블록에 씁니다
 
-1. Godot 편집기 오른쪽 위 `Notion Dialogue Sync` 패널을 엽니다.
-2. 먼저 `Dry Run`을 누릅니다. 이 작업은 게임 파일을 바꾸지 않습니다.
-3. 상태, 장면/블록/캐릭터 수, `manifest SHA-256`, 진단 목록을 확인합니다.
-4. 오류가 있으면 진단 행을 더블클릭해 Notion 원문을 고친 뒤 다시 `Dry Run`합니다.
-5. 이상이 없으면 `Sync Dialogues`를 누릅니다. 성공한 경우에만 `data/generated/dialogues`가 교체됩니다.
-6. 동기화 중에는 두 버튼이 잠깁니다. 완료되기 전에 Godot를 닫지 마세요.
+발생 시점, 조건, 결과는 일반 대사와 섞지 않고 Notion 인용 블록에 씁니다. 이 내용은 개발자 전용 메모가 아니라 두 작성자가 함께 읽는 정식 기획입니다.
 
-게임은 Notion에 접속하지 않고 마지막으로 성공한 로컬 JSON을 읽습니다. 인증 정보가 없어도 플레이할 수 있습니다.
+이벤트 제목 바로 아래의 예시입니다.
 
-## 진단 메시지 해결표
+> 발생
+> - 젤리뽀의 집에 들어왔을 때
+>
+> 조건
+> - 교환일기 열쇠를 가지고 있음
+> - 아직 열쇠를 보여주지 않음
+>
+> 결과
+> - 열쇠를 보여줌 상태로 기록
 
-진단은 `severity [code] message` 형태입니다. 아래 표의 영문은 패널에 표시되는 실제 코드 또는 메시지 핵심 문구입니다.
+인용 블록은 가장 가까운 단위에 적용됩니다.
 
-| code / message | 뜻과 해결 방법 |
-|---|---|
-| `mapping_error` | Notion 속성이 빠졌거나 형식이 맞지 않습니다. 메시지에 나온 속성의 칸 종류와 값을 확인합니다. |
-| `invalid_input` / `must be an array` | 동기화 입력 묶음이 손상되었습니다. 다시 Dry Run하고 계속되면 개발자에게 알립니다. |
-| `invalid_scene_key` / `scene_key must be a nonblank string` | 장면의 `scene_key`가 비었습니다. 고유한 영문 키를 적습니다. |
-| `duplicate_scene_key` / `scene_key must be unique` | 같은 `scene_key`가 두 장면에 있습니다. 하나를 바꾸고 연결된 블록의 `scene`도 확인합니다. |
-| `unsafe_scene_filename` | `manifest`, `CON` 같은 예약 이름이나 `<>:"/\\|?*` 문자를 썼습니다. 점과 영문 소문자 중심의 키로 바꿉니다. |
-| `duplicate_scene_filename` | 점이 밑줄로 바뀐 뒤 다른 장면과 파일명이 겹칩니다. 두 `scene_key` 중 하나를 바꿉니다. |
-| `invalid_start_flow` / `start_flow must be a nonempty flow name` | 장면의 `start_flow`가 비었습니다. 처음 실행할 흐름 이름을 적습니다. |
-| `invalid_flow` / `block flow must be a nonempty name` | 블록의 `flow`가 비었습니다. 같은 묶음에서 사용할 흐름 이름을 적습니다. |
-| `unknown_scene` / `block references an unknown scene` | 블록이 삭제되었거나 다른 장면을 가리킵니다. `scene` 관계를 다시 선택합니다. |
-| `missing_target_flow` / `a terminal non-end block requires target_flow` | 다음 줄이 없는 블록인데 목적 흐름도 없습니다. `target_flow`를 적거나 마지막 블록을 `end`로 바꿉니다. |
-| `unknown_target_flow` / `target_flow does not name a compiled flow` | `target_flow`와 같은 이름의 `flow`가 없습니다. 철자와 공백을 확인합니다. |
-| `duplicate_node_id` | 같은 Notion 블록이 중복 수집되었습니다. 복제된 관계/행을 확인하고 개발자에게 알립니다. |
-| `unknown_expression` / `expression is not in the character catalog` | 선택한 표정이 캐릭터의 `expressions`에 없습니다. 등록된 표정을 고르거나 새 표정을 요청합니다. |
-| `invalid_schema_version` | 생성 형식 버전이 맞지 않습니다. Notion 내용을 더 고치지 말고 개발자에게 알립니다. |
-| `invalid_nodes` / `nodes must be a nonempty dictionary` | 장면에 유효한 블록이 하나도 없습니다. 최소 한 줄과 끝 노드를 만듭니다. |
-| `invalid_node_id` / `node ids must be nonempty strings` | 블록 식별자가 비정상입니다. 해당 행을 새로 만들거나 개발자에게 알립니다. |
-| `invalid_node` / `node must be a dictionary` | 생성된 블록 형식이 손상되었습니다. 개발자에게 알립니다. |
-| `invalid_entry_node` / `entry_node must be a nonempty string` | 시작 흐름에 첫 블록이 없습니다. `start_flow` 흐름에 블록을 추가합니다. |
-| `missing_entry_node` / `entry_node does not reference a node` | `start_flow`가 실제 블록으로 이어지지 않습니다. 흐름 이름을 맞춥니다. |
-| `unsupported_node_type` | `type`이 `line`, `choice`, `effect`, `command`, `jump`, `end` 중 하나가 아닙니다. 올바른 값을 다시 고릅니다. |
-| `invalid_field` | 대사/선택지의 필수 값이 비었거나 형식이 틀렸습니다. 뒤의 상세 메시지에서 `speaker`, `text`, `choice item`, `next`, `command` 중 무엇인지 확인합니다. |
-| `unknown_character` / `line speaker is not in the character catalog` | `speaker`가 Characters에 없습니다. 관계를 다시 선택하거나 캐릭터 등록을 요청합니다. |
-| `invalid_expression` / `line expression must be a nonempty string` | `line`의 표정이 비었습니다. 허용된 표정을 선택합니다. |
-| `invalid_condition` | 숨겨진 조건 JSON이 지원 형식이 아닙니다. `notes`에 원하는 조건을 평문으로 남기고 개발자에게 수정 요청합니다. |
-| `invalid_effect` | 숨겨진 효과 JSON이 지원 형식이 아닙니다. `notes`에 원하는 효과를 평문으로 남기고 개발자에게 수정 요청합니다. |
-| `dangling_target` | 선택지나 다음 노드가 존재하지 않는 블록을 가리킵니다. `target_flow` 철자와 대상 흐름의 첫 행을 확인합니다. |
-| `invalid_character_key` / `character keys must be unique and nonempty` | Characters의 `character_key`가 비었거나 중복입니다. 고유한 키로 고칩니다. |
-| `cycle_without_exit` / `cycle has no edge to a node outside the cycle` | 분기가 끝없이 반복됩니다. 반복 흐름 바깥으로 나가는 선택지나 `end` 경로를 하나 추가합니다. |
-| `automatic_path_too_long` | 대사나 선택지 없이 자동 실행되는 효과/명령/점프가 256개를 넘습니다. 중간에 대사·선택지를 넣거나 흐름을 줄입니다. |
+- 이벤트 아래 결과: 이벤트가 정상 종료하거나 다른 이벤트로 넘어가기 직전 적용
+- 흐름 아래 결과: 그 흐름에서 다음 흐름으로 이동하거나 종료되기 직전 적용
+- 선택지 아래 결과: 선택 직후 목적 흐름으로 이동하기 전에 적용
 
-HTTP 401은 토큰 설정, 403/404는 데이터베이스 공유 또는 ID 설정, 429는 잠시 뒤 재시도를 뜻합니다. 이 설정은 개발자 영역이므로 디자이너는 값을 복사해 채팅이나 문서에 붙이지 말고 오류 코드만 전달하세요.
+특정 선택지에만 조건이나 결과가 있다면 선택지 목록 뒤에서 문구를 정확히 다시 적어 이름을 붙입니다.
+
+> 선택지 · 열쇠를 보여준다
+>
+> 조건
+> - 교환일기 열쇠를 가지고 있음
+>
+> 결과
+> - 열쇠를 보여줌 상태로 기록
+
+선택지 문구가 바뀌면 이 이름도 같이 바꿉니다. 조건이나 결과가 이벤트·흐름·선택지 중 어디에 속하는지 애매하면 Codex나 Claude가 추측하게 두지 말고 본문 위치를 먼저 확정합니다.
+
+## 주석과 논의는 Notion 댓글로 남깁니다
+
+연출 메모, 질문, 대안 문장, 검토 대화는 관련 문장이나 블록에 Notion 기본 댓글로 남깁니다. 별도의 `주석` 본문 구역을 만들 필요가 없습니다.
+
+댓글은 집필 맥락일 뿐 게임 규칙의 정식 입력이 아닙니다. 댓글에서 조건, 결과, 분기 규칙이 확정되면 인용 블록이나 대사·선택지 본문으로 옮깁니다. 댓글을 읽을 수 없는 환경에서도 같은 본문은 같은 게임 데이터를 만들어야 합니다.
+
+## 한 페이지를 게임 데이터로 반영하기
+
+페이지 편집을 마치면 Codex 또는 Claude에게 다음과 같이 요청합니다.
+
+```text
+이 Notion 대화 페이지 하나를 프로젝트의 문서형 대화 규칙에 맞춰 정규화해줘.
+기존 source_id와 내부 키는 유지하고, 서사 용어 참고서로 모든 매핑을 검증해줘.
+정규화 파일을 갱신한 뒤 dialogue import CLI를 dry-run하고 결과만 먼저 보여줘.
+```
+
+AI는 원문의 제목, 문단, 인용 블록과 접근 가능한 댓글을 읽고 `data/dialogues/authoring` 아래의 추적 가능한 정규화 파일을 갱신합니다. 작성자가 이 JSON을 직접 편집하지는 않지만, 게시 전 Git diff로 변경 내용을 검토합니다.
+
+개발자가 프로젝트 루트에서 실행하는 미리보기 명령은 다음과 같습니다.
+
+```powershell
+pwsh -File tools/run_godot.ps1 --headless --path . --script res://tools/dialogue_import/dialogue_import_cli.gd -- --dry-run
+```
+
+매핑 결과는 다음 세 가지로 판단합니다.
+
+- 정확히 연결됨: 참고서의 정식 이름 또는 승인된 동의 표현과 일치하여 컴파일 가능
+- 오류·확인 필요: 등록되지 않았거나 여러 뜻으로 해석되어 게시 불가; 본문을 고치거나 새 용어를 먼저 합의해 사전에 등록
+- 연결 제안: 기존 항목일 가능성이 있지만 아직 확정되지 않아 게시 불가; 사용자가 의미를 확인한 뒤 승인된 매핑으로 갱신
+
+AI는 확인 없이 새 상태 키를 만들지 않습니다. 내부 대응이 궁금하면 생성된 [서사 상태·대화 용어 참고서](narrative-state-reference.md)를 함께 확인합니다.
+
+## 경고 확인과 게시
+
+dry-run에 오류가 하나라도 있으면 본문 또는 용어 사전을 수정하고 다시 실행합니다. 경고는 빠짐없이 읽습니다. `그 외` 없음, 도달하지 않는 흐름, UI에서 확인할 긴 문장 등이 경고가 될 수 있습니다.
+
+경고가 없으면 다음 명령으로 게시합니다.
+
+```powershell
+pwsh -File tools/run_godot.ps1 --headless --path . --script res://tools/dialogue_import/dialogue_import_cli.gd
+```
+
+경고가 있고 사용자와 디자이너가 모든 경고를 검토해 그대로 게시하기로 명시적으로 합의한 경우에만 `--allow-warnings`를 붙입니다.
+
+```powershell
+pwsh -File tools/run_godot.ps1 --headless --path . --script res://tools/dialogue_import/dialogue_import_cli.gd -- --allow-warnings
+```
+
+명령이 성공하면 정규화 파일과 `data/generated/dialogues`의 생성 파일을 모두 Git diff로 확인합니다. 특히 다음을 봅니다.
+
+- 이벤트 순서와 추가·삭제된 흐름
+- 자연어 조건이 연결된 상태와 연산
+- 선택지·흐름·이벤트 결과의 적용 위치
+- 대사, 캐릭터, 표정, 선택지 목적지
+- `events.json`, `source_map.json`, `manifest.json`을 포함한 생성 스냅샷
+
+오류, 검증 실패, 쓰기 실패가 발생하면 마지막 정상 런타임 스냅샷은 교체되지 않습니다. 일부 파일만 새 버전이 되는 혼합 게시도 허용하지 않습니다. 실패 뒤에는 반복 게시로 덮으려 하지 말고 진단을 해결한 뒤 dry-run부터 다시 시작합니다. 게임은 Notion이나 인증 정보 없이 마지막 정상 로컬 스냅샷을 재생합니다.
+
+## 기존 데이터베이스의 상태
+
+기존 `Characters`, `Dialogue Scenes`, `Dialogue Blocks` 데이터베이스는 새 대화를 작성하는 현행 작업 공간이 아닙니다. 사용자가 별도로 보관 또는 삭제를 결정하기 전까지 외부의 읽기 전용 참고 자료로 남겨 둡니다. 이 프로젝트에서 그 데이터베이스를 수정·보관 처리·삭제하지 않습니다.

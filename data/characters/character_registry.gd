@@ -11,7 +11,7 @@ func character_keys() -> Array[StringName]:
 		var character_key := StringName(definition.get("character_key"))
 		if not character_key.is_empty() and character_key not in result:
 			result.append(character_key)
-	result.sort()
+	result.sort_custom(func(left: StringName, right: StringName) -> bool: return String(left) < String(right))
 	return result
 
 func get_definition(character_key: StringName) -> Resource:

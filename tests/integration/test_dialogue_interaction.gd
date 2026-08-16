@@ -54,8 +54,8 @@ func run() -> void:
 	_test_single_app_composition(router, dialogue, adapter)
 	_test_production_fixture_is_immutable()
 	_test_invalid_adapter_payloads_are_ignored(router, dialogue, adapter)
-	_test_talk_payload_starts_and_abort_restores(router, dialogue, view)
-	_test_empty_override_starts_at_entry(router, dialogue, view)
+	_test_document_talk_payload_starts_and_abort_restores(router, dialogue, view)
+	_test_legacy_payload_is_rejected(router, dialogue, adapter, view)
 	await _test_document_event_resolution(adapter, dialogue, view)
 	await _test_visible_mirror_keyboard_flow(app, router, dialogue, view, probe)
 	var original_dialogue_loader: DialogueGraphLoader = dialogue.graph_loader
@@ -124,40 +124,42 @@ func _test_production_fixture_is_immutable() -> void:
 
 func _test_invalid_adapter_payloads_are_ignored(router: InteractionRouter, dialogue: DialogueService, adapter: Node) -> void:
 	var invalid_requests: Array[Dictionary] = [
-		{"kind":&"use", "payload":{"scene_key":&"foundation.inspect", "node_id":&"line_1"}},
+		{"kind":&"use", "payload":{"dialogue_bundle_key":&"foundation.inspect", "dialogue_trigger_key":&"mirror.inspect"}},
 		{"kind":&"inspect", "payload":{}},
-		{"kind":&"inspect", "payload":{"scene_key":&"", "node_id":&"line_1"}},
-		{"kind":&"inspect", "payload":{"scene_key":17, "node_id":&"line_1"}},
-		{"kind":&"talk", "payload":{"scene_key":&"foundation.inspect", "node_id":17}},
+		{"kind":&"inspect", "payload":{"scene_key":&"foundation.inspect"}},
+		{"kind":&"inspect", "payload":{"dialogue_bundle_key":&"foundation.inspect"}},
+		{"kind":&"inspect", "payload":{"dialogue_trigger_key":&"mirror.inspect"}},
+		{"kind":&"talk", "payload":{"dialogue_bundle_key":17, "dialogue_trigger_key":&"mirror.inspect"}},
+		{"kind":&"inspect", "payload":{"dialogue_bundle_key":&"missing.bundle", "dialogue_trigger_key":&"mirror.inspect"}},
+		{"kind":&"inspect", "payload":{"dialogue_bundle_key":&"foundation.inspect", "dialogue_trigger_key":&"missing.trigger"}},
 	]
 	for request: Dictionary in invalid_requests:
 		router.action_requested.emit(request["kind"], request["payload"])
 		assert_eq(GameSession.current_mode, GameModeResource.Value.EXPLORATION, "unsupported or malformed action preserves exploration")
 		assert_eq(dialogue.current_graph, null, "unsupported or malformed action does not start dialogue")
 	if adapter != null:
-		assert_eq(adapter.call("handle_action", &"use", {"scene_key":&"foundation.inspect"}), ERR_INVALID_PARAMETER, "direct unsupported action exposes its real error")
+		assert_eq(adapter.call("handle_action", &"use", {"dialogue_bundle_key":&"foundation.inspect", "dialogue_trigger_key":&"mirror.inspect"}), ERR_INVALID_PARAMETER, "direct unsupported action exposes its real error")
 		assert_eq(adapter.call("handle_action", &"inspect", {}), ERR_INVALID_PARAMETER, "direct malformed payload exposes its real error")
+		assert_eq(adapter.call("handle_action", &"inspect", {"dialogue_bundle_key":&"missing.bundle", "dialogue_trigger_key":&"mirror.inspect"}), ERR_DOES_NOT_EXIST, "unknown document bundle exposes its resolver error")
+		assert_eq(adapter.call("handle_action", &"inspect", {"dialogue_bundle_key":&"foundation.inspect", "dialogue_trigger_key":&"missing.trigger"}), ERR_DOES_NOT_EXIST, "unknown document trigger exposes its resolver error")
 
-func _test_talk_payload_starts_and_abort_restores(router: InteractionRouter, dialogue: DialogueService, view: DialogueView) -> void:
-	router.action_requested.emit(&"talk", {"scene_key":&"foundation.inspect"})
-	assert_eq(GameSession.current_mode, GameModeResource.Value.DIALOGUE, "talk payload enters dialogue")
-	assert_not_null(dialogue.current_graph, "talk payload loads the production graph")
+func _test_document_talk_payload_starts_and_abort_restores(router: InteractionRouter, dialogue: DialogueService, view: DialogueView) -> void:
+	router.action_requested.emit(&"talk", {"dialogue_bundle_key":&"foundation.inspect", "dialogue_trigger_key":&"mirror.inspect"})
+	assert_eq(GameSession.current_mode, GameModeResource.Value.DIALOGUE, "document talk payload enters dialogue")
+	assert_not_null(dialogue.current_graph, "document talk payload loads the production graph")
 	if dialogue.current_graph != null:
-		assert_eq(dialogue.current_node_id, dialogue.current_graph.entry_node, "missing node override uses the loaded graph entry")
+		assert_false(dialogue.current_node_id.is_empty(), "event resolution supplies a concrete entry node")
 	dialogue.abort_dialogue(&"test_cleanup")
 	assert_eq(GameSession.current_mode, GameModeResource.Value.EXPLORATION, "abort restores exploration")
 	assert_false(view.visible, "abort hides the dialogue view")
 
-func _test_empty_override_starts_at_entry(router: InteractionRouter, dialogue: DialogueService, view: DialogueView) -> void:
+func _test_legacy_payload_is_rejected(router: InteractionRouter, dialogue: DialogueService, adapter: Node, view: DialogueView) -> void:
 	router.action_requested.emit(&"inspect", {"scene_key":&"foundation.inspect", "node_id":&""})
-	assert_eq(GameSession.current_mode, GameModeResource.Value.DIALOGUE, "explicit empty node override enters dialogue")
-	assert_not_null(dialogue.current_graph, "explicit empty node override loads the production graph")
-	if dialogue.current_graph == null:
-		return
-	assert_eq(dialogue.current_node_id, dialogue.current_graph.entry_node, "explicit empty node override uses the loaded graph entry")
-	dialogue.abort_dialogue(&"test_cleanup")
-	assert_eq(GameSession.current_mode, GameModeResource.Value.EXPLORATION, "empty-override abort restores exploration")
-	assert_false(view.visible, "empty-override abort hides the dialogue view")
+	assert_eq(GameSession.current_mode, GameModeResource.Value.EXPLORATION, "legacy direct scene payload stays in exploration")
+	assert_eq(dialogue.current_graph, null, "legacy direct scene payload never opens a graph")
+	assert_false(view.visible, "legacy direct scene payload never opens DialogueView")
+	if adapter != null:
+		assert_eq(adapter.call("handle_action", &"inspect", {"scene_key":&"foundation.inspect"}), ERR_INVALID_PARAMETER, "legacy direct scene payload returns a non-OK error")
 
 func _test_document_event_resolution(adapter: Node, dialogue: DialogueService, view: DialogueView) -> void:
 	if adapter == null:
@@ -258,7 +260,7 @@ func _test_visible_mirror_keyboard_flow(app: Node, router: InteractionRouter, di
 		return
 	var interaction := mirror.get_interaction()
 	assert_eq(interaction.kind, &"inspect", "mirror requests inspection")
-	assert_eq(interaction.payload, {"scene_key":&"foundation.inspect"}, "mirror defers normal entry to the compiled graph")
+	assert_eq(interaction.payload, {"dialogue_bundle_key":&"foundation.inspect", "dialogue_trigger_key":&"mirror.inspect"}, "mirror resolves its document bundle and trigger")
 
 	player.position = mirror.position - Vector2(32, 0)
 	player.facing = Vector2.RIGHT
@@ -300,7 +302,7 @@ func _test_visible_mirror_keyboard_flow(app: Node, router: InteractionRouter, di
 		assert_not_null(portrait.texture, "mirror line renders a portrait")
 
 	var line_count := await _advance_to_choice(dialogue)
-	assert_true(line_count >= 1, "mirror flow presents at least one line before choices")
+	assert_true(line_count >= 2, "mirror flow presents multiple lines before choices")
 	assert_eq(_current_node_type(dialogue), "choice", "keyboard advance reaches a semantic choice boundary")
 	var choices := view.get_node_or_null("Panel/Margin/Layout/Content/ChoiceScroll/ChoiceContainer") as VBoxContainer
 	assert_not_null(choices, "dialogue view exposes its choice container")
@@ -322,6 +324,17 @@ func _test_visible_mirror_keyboard_flow(app: Node, router: InteractionRouter, di
 	_send_action(&"ui_accept", false)
 	await get_tree().process_frame
 	assert_true(GameSession.narrative_state.get_flag(&"mirror_seen"), "keyboard choice applies mirror_seen")
+	var later_line_count := await _advance_to_choice(dialogue)
+	assert_true(later_line_count >= 2, "chosen branch presents multiple later lines before a second choice")
+	assert_eq(_current_node_type(dialogue), "choice", "chosen branch reaches its later second choice")
+	assert_true(choices.get_child_count() >= 2, "later choice renders both branch destinations")
+	if choices.get_child_count() >= 2:
+		var finish_button := choices.get_child(1) as Button
+		assert_not_null(finish_button, "later finish choice is a button")
+		if finish_button != null:
+			finish_button.pressed.emit()
+			await get_tree().process_frame
+			assert_eq(await _advance_to_choice(dialogue), 1, "rejoined branch renders its final line before ending")
 	assert_eq(GameSession.current_mode, GameModeResource.Value.EXPLORATION, "dialogue end restores exploration")
 	assert_false(view.visible, "dialogue end hides the view")
 	assert_true(prompt.visible, "exploration restoration shows the still-facing mirror prompt")
@@ -373,6 +386,22 @@ func _test_plan3_replacement_snapshot(app: Node, dialogue: DialogueService, view
 	if player == null or mirror == null:
 		_cleanup_plan3_replacement(dialogue, original_loader, snapshot_path, absolute_directory)
 		return
+	var adapter := app.get_node_or_null("ServiceLayer/DialogueActionAdapter")
+	assert_not_null(adapter, "replacement snapshot uses the real document dialogue adapter")
+	if adapter == null:
+		_cleanup_plan3_replacement(dialogue, original_loader, snapshot_path, absolute_directory)
+		return
+	var original_resolver: Variant = adapter.get("event_resolver")
+	var resolver := DialogueEventResolver.new()
+	resolver.event_index = DialogueEventIndex.from_dictionary({
+		"schema_version":1,
+		"bundles":{"foundation.inspect":{"triggers":{"mirror.inspect":[{
+			"event_key":"default",
+			"entry_node":replacement["entry_node"],
+			"conditions":[],
+		}]}}},
+	})
+	adapter.set("event_resolver", resolver)
 	player.position = mirror.position - Vector2(32, 0)
 	player.facing = Vector2.RIGHT
 	await get_tree().physics_frame
@@ -387,25 +416,27 @@ func _test_plan3_replacement_snapshot(app: Node, dialogue: DialogueService, view
 	var choices := view.get_node_or_null("Panel/Margin/Layout/Content/ChoiceScroll/ChoiceContainer") as VBoxContainer
 	assert_not_null(choices, "replacement snapshot reaches the real choice container")
 	if choices == null:
-		_cleanup_plan3_replacement(dialogue, original_loader, snapshot_path, absolute_directory)
+		_cleanup_plan3_replacement(dialogue, original_loader, snapshot_path, absolute_directory, adapter, original_resolver)
 		return
 	assert_eq(choices.get_child_count(), 2, "replacement snapshot publishes its choices")
 	if choices.get_child_count() != 2:
-		_cleanup_plan3_replacement(dialogue, original_loader, snapshot_path, absolute_directory)
+		_cleanup_plan3_replacement(dialogue, original_loader, snapshot_path, absolute_directory, adapter, original_resolver)
 		return
 	var first_choice := choices.get_child(0) as Button
 	assert_not_null(first_choice, "replacement snapshot first choice is a button")
 	if first_choice == null:
-		_cleanup_plan3_replacement(dialogue, original_loader, snapshot_path, absolute_directory)
+		_cleanup_plan3_replacement(dialogue, original_loader, snapshot_path, absolute_directory, adapter, original_resolver)
 		return
 	first_choice.pressed.emit()
 	assert_true(GameSession.narrative_state.get_flag(&"mirror_seen"), "replacement snapshot choice applies mirror_seen offline")
 	assert_eq(GameSession.current_mode, GameModeResource.Value.EXPLORATION, "replacement snapshot restores exploration")
-	_cleanup_plan3_replacement(dialogue, original_loader, snapshot_path, absolute_directory)
+	_cleanup_plan3_replacement(dialogue, original_loader, snapshot_path, absolute_directory, adapter, original_resolver)
 
-func _cleanup_plan3_replacement(dialogue: DialogueService, original_loader: DialogueGraphLoader, snapshot_path: String, absolute_directory: String) -> void:
+func _cleanup_plan3_replacement(dialogue: DialogueService, original_loader: DialogueGraphLoader, snapshot_path: String, absolute_directory: String, adapter: Node = null, original_resolver: Variant = null) -> void:
 	if dialogue.current_graph != null:
 		dialogue.abort_dialogue(&"test_cleanup")
+	if adapter != null:
+		adapter.set("event_resolver", original_resolver)
 	dialogue.graph_loader = original_loader
 	var absolute_snapshot_path := ProjectSettings.globalize_path(snapshot_path)
 	if FileAccess.file_exists(absolute_snapshot_path):

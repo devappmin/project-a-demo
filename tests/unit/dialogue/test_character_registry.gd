@@ -4,8 +4,8 @@ const REGISTRY_SCRIPT_PATH := "res://data/characters/character_registry.gd"
 const REGISTRY_RESOURCE_PATH := "res://data/characters/character_registry.tres"
 const LOADER_PATH := "res://game/narrative/dialogue/dialogue_graph_loader.gd"
 const VIEW_SCENE_PATH := "res://ui/dialogue/dialogue_view.tscn"
-const COMPILER_PATH := "res://tools/notion_sync/dialogue_compiler.gd"
-const FIXTURE_FACTORY_PATH := "res://tests/fixtures/notion/notion_fixture_factory.gd"
+const COMPILER_PATH := "res://tools/dialogue_import/document_dialogue_compiler.gd"
+const FIXTURE_FACTORY_PATH := "res://tests/fixtures/dialogue_import/dialogue_bundle_fixture_factory.gd"
 
 func run() -> void:
 	assert_true(ResourceLoader.exists(REGISTRY_SCRIPT_PATH, "Script"), "shared character registry script exists")
@@ -32,7 +32,7 @@ func run() -> void:
 	assert_true(injected_registry.call("has_expression", &"test_hero", &"neutral"), "injected registry exposes its test expression")
 	await _test_loader_uses_registry(production_registry, injected_registry)
 	await _test_view_uses_registry(production_registry, injected_registry)
-	_test_compiler_validates_notion_catalog(production_registry, injected_registry)
+	_test_compiler_validates_character_registry(production_registry, injected_registry)
 
 func _test_loader_uses_registry(production_registry: Resource, injected_registry: Resource) -> void:
 	var loader_script: Script = load(LOADER_PATH)
@@ -80,33 +80,49 @@ func _test_view_uses_registry(production_registry: Resource, injected_registry: 
 	view.queue_free()
 	await get_tree().process_frame
 
-func _test_compiler_validates_notion_catalog(production_registry: Resource, injected_registry: Resource) -> void:
+func _test_compiler_validates_character_registry(production_registry: Resource, injected_registry: Resource) -> void:
 	var compiler: Script = load(COMPILER_PATH)
-	var compile_method := _method(compiler, "compile")
-	assert_true(compile_method.get("args", []).size() >= 2, "compiler exposes registry injection")
-	if compile_method.get("args", []).size() < 2:
+	var compile_method := _method(compiler, "compile_bundles")
+	assert_true(compile_method.get("args", []).size() >= 3, "document compiler exposes registry injection")
+	if compile_method.get("args", []).size() < 3:
 		return
 	var fixture_factory: Script = load(FIXTURE_FACTORY_PATH)
-	var injected_input: Dictionary = fixture_factory.call("valid_dialogue_input")
-	injected_input["characters"][0]["character_key"] = "test_hero"
-	injected_input["blocks"][0]["speaker"] = "test_hero"
-	var injected_result: Dictionary = compiler.call("compile", injected_input, injected_registry)
-	assert_true(injected_result["ok"], "editor compiler validates against the injected local registry: %s" % [str(injected_result.get("issues", []))])
-	var unknown_result: Dictionary = compiler.call("compile", injected_input, production_registry)
-	assert_false(unknown_result["ok"], "Notion character absent from the local registry blocks publication")
-	assert_true(_has_issue(unknown_result["issues"], "unknown_local_character", injected_input["characters"][0]["source_url"]), "unknown local character mismatch is source-linked")
-	for field_case: Dictionary in [
-		{"field":"default_expression", "value":"missing", "code":"unknown_local_default_expression"},
-		{"field":"expressions", "value":["neutral", "missing"], "code":"unknown_local_expression"}
-	]:
-		var input: Dictionary = fixture_factory.call("valid_dialogue_input")
-		input["characters"][0][field_case["field"]] = field_case["value"]
-		var result: Dictionary = compiler.call("compile", input, production_registry)
-		assert_false(result["ok"], "Notion %s absent locally blocks publication" % field_case["field"])
-		assert_true(_has_issue(result["issues"], field_case["code"], input["characters"][0]["source_url"]), "Notion %s mismatch is source-linked" % field_case["field"])
-	var subset_input: Dictionary = fixture_factory.call("valid_dialogue_input")
-	var subset_result: Dictionary = compiler.call("compile", subset_input, production_registry)
-	assert_true(subset_result["ok"], "local registry may contain characters not advertised by Notion")
+	var injected_bundle: Dictionary = _importable_bundle(fixture_factory)
+	_replace_line_identity(injected_bundle, "test_hero", "neutral")
+	var injected_bundles: Array[Dictionary] = [injected_bundle]
+	var injected_result: Dictionary = compiler.call("compile_bundles", injected_bundles, null, injected_registry)
+	assert_true(injected_result["ok"], "document compiler validates against the injected local registry: %s" % [str(injected_result.get("issues", []))])
+	var unknown_result: Dictionary = compiler.call("compile_bundles", injected_bundles, null, production_registry)
+	assert_false(unknown_result["ok"], "authoring character absent from the local registry blocks publication")
+	assert_true(_has_issue(unknown_result["issues"], "unknown_character", injected_bundle["source_url"]), "unknown authoring character mismatch is source-linked")
+	var unknown_expression_bundle: Dictionary = _importable_bundle(fixture_factory)
+	_replace_line_identity(unknown_expression_bundle, "retti", "missing")
+	var unknown_expression_bundles: Array[Dictionary] = [unknown_expression_bundle]
+	var unknown_expression_result: Dictionary = compiler.call("compile_bundles", unknown_expression_bundles, null, production_registry)
+	assert_false(unknown_expression_result["ok"], "authoring expression absent locally blocks publication")
+	assert_true(_has_issue(unknown_expression_result["issues"], "unknown_expression", unknown_expression_bundle["source_url"]), "unknown authoring expression mismatch is source-linked")
+	var production_bundle: Dictionary = _importable_bundle(fixture_factory)
+	var production_bundles: Array[Dictionary] = [production_bundle]
+	var production_result: Dictionary = compiler.call("compile_bundles", production_bundles, null, production_registry)
+	assert_true(production_result["ok"], "shared production registry accepts the tracked authoring characters")
+
+func _importable_bundle(fixture_factory: Script) -> Dictionary:
+	var bundle: Dictionary = fixture_factory.call("valid_bundle")
+	var inspect_blocks: Array = bundle["triggers"][0]["events"][1]["flows"][1]["blocks"]
+	inspect_blocks.remove_at(1)
+	return bundle
+
+func _replace_line_identity(value: Variant, character_key: String, expression: String) -> void:
+	if typeof(value) == TYPE_DICTIONARY:
+		var dictionary: Dictionary = value
+		if String(dictionary.get("type", "")) == "line":
+			dictionary["speaker"] = character_key
+			dictionary["expression"] = expression
+		for child: Variant in dictionary.values():
+			_replace_line_identity(child, character_key, expression)
+	elif typeof(value) == TYPE_ARRAY:
+		for child: Variant in value:
+			_replace_line_identity(child, character_key, expression)
 
 func _injected_registry(registry_script: Script) -> Resource:
 	var definition_script: Script = load("res://data/characters/character_definition.gd")

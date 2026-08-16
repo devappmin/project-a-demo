@@ -1,0 +1,210 @@
+{
+  "schema_version": 1,
+  "source_id": "notion-page-foundation-inspect",
+  "source_url": "https://www.notion.so/foundation-inspect",
+  "bundle_key": "foundation.inspect",
+  "title": "기초 방",
+  "comments": [
+    {
+      "text": "페이지 전체의 연출 방향을 논의하는 댓글이며 게임 데이터에는 들어가지 않는다."
+    }
+  ],
+  "triggers": [
+    {
+      "source_id": "notion-trigger-mirror-inspect",
+      "trigger_key": "mirror.inspect",
+      "name": "거울 조사",
+      "events": [
+        {
+          "source_id": "notion-event-mirror-seen",
+          "event_key": "seen",
+          "name": "이미 살펴본 거울",
+          "conditions": [
+            {
+              "source_text": "거울을 자세히 봄",
+              "term_name": "거울을 자세히 봄",
+              "mapping_status": "exact",
+              "kind": "flag",
+              "key": "mirror_seen",
+              "operator": "eq",
+              "value": true
+            }
+          ],
+          "effects": [],
+          "flows": [
+            {
+              "source_id": "notion-flow-seen-start",
+              "flow_key": "start",
+              "name": "흐름 · 시작",
+              "effects": [],
+              "blocks": [
+                {
+                  "type": "line",
+                  "source_id": "notion-line-seen-01",
+                  "speaker": "retti",
+                  "expression": "neutral",
+                  "text": "아까보다 평범한 거울처럼 보인다."
+                },
+                {
+                  "type": "end",
+                  "source_id": "notion-end-seen"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "source_id": "notion-event-mirror-default",
+          "event_key": "default",
+          "name": "그 외",
+          "conditions": [],
+          "effects": [],
+          "flows": [
+            {
+              "source_id": "notion-flow-default-start",
+              "flow_key": "start",
+              "name": "흐름 · 시작",
+              "effects": [],
+              "blocks": [
+                {
+                  "type": "line",
+                  "source_id": "notion-line-default-01",
+                  "speaker": "retti",
+                  "expression": "neutral",
+                  "text": "낯선 거울이다."
+                },
+                {
+                  "type": "line",
+                  "source_id": "notion-line-default-02",
+                  "speaker": "retti",
+                  "expression": "uneasy",
+                  "text": "표면 안쪽에서 희미한 빛이 흔들린다.",
+                  "comments": [
+                    {
+                      "text": "빛의 색은 배경 원화가 정해진 뒤 다시 논의한다."
+                    }
+                  ]
+                },
+                {
+                  "type": "choice",
+                  "source_id": "notion-choice-default",
+                  "items": [
+                    {
+                      "source_id": "notion-choice-inspect",
+                      "text": "거울을 자세히 본다",
+                      "conditions": [],
+                      "effects": [
+                        {
+                          "source_text": "거울을 자세히 봄",
+                          "term_name": "거울을 자세히 봄",
+                          "mapping_status": "exact",
+                          "kind": "flag_set",
+                          "key": "mirror_seen",
+                          "value": true
+                        }
+                      ],
+                      "target_kind": "flow",
+                      "target_key": "inspect"
+                    },
+                    {
+                      "source_id": "notion-choice-step-back",
+                      "text": "한 걸음 물러난다",
+                      "conditions": [],
+                      "effects": [],
+                      "target_kind": "flow",
+                      "target_key": "hesitate"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "source_id": "notion-flow-inspect",
+              "flow_key": "inspect",
+              "name": "자세히 보기",
+              "effects": [],
+              "blocks": [
+                {
+                  "type": "line",
+                  "source_id": "notion-line-inspect-01",
+                  "speaker": "retti",
+                  "expression": "uneasy",
+                  "text": "거울 속에는 이 방과 조금 다른 방이 비친다."
+                },
+                {
+                  "type": "line",
+                  "source_id": "notion-line-inspect-02",
+                  "speaker": "retti",
+                  "expression": "neutral",
+                  "text": "조금 더 살펴볼까?"
+                },
+                {
+                  "type": "choice",
+                  "source_id": "notion-choice-inspect-next",
+                  "items": [
+                    {
+                      "source_id": "notion-choice-return-start",
+                      "text": "처음부터 다시 생각한다",
+                      "conditions": [],
+                      "effects": [],
+                      "target_kind": "flow",
+                      "target_key": "start"
+                    },
+                    {
+                      "source_id": "notion-choice-finish-inspect",
+                      "text": "조사를 마친다",
+                      "conditions": [],
+                      "effects": [],
+                      "target_kind": "flow",
+                      "target_key": "rejoin"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "source_id": "notion-flow-hesitate",
+              "flow_key": "hesitate",
+              "name": "망설이기",
+              "effects": [],
+              "blocks": [
+                {
+                  "type": "line",
+                  "source_id": "notion-line-hesitate-01",
+                  "speaker": "retti",
+                  "expression": "uneasy",
+                  "text": "지금은 가까이 가지 않는 편이 좋을지도 몰라."
+                },
+                {
+                  "type": "jump",
+                  "source_id": "notion-jump-hesitate-rejoin",
+                  "target_kind": "flow",
+                  "target_key": "rejoin"
+                }
+              ]
+            },
+            {
+              "source_id": "notion-flow-rejoin",
+              "flow_key": "rejoin",
+              "name": "대화 정리",
+              "effects": [],
+              "blocks": [
+                {
+                  "type": "line",
+                  "source_id": "notion-line-rejoin-01",
+                  "speaker": "retti",
+                  "expression": "neutral",
+                  "text": "거울은 다시 조용해졌다."
+                },
+                {
+                  "type": "end",
+                  "source_id": "notion-end-default"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
