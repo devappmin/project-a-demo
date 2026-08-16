@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "terms": [
+    {
+      "kind": "flag",
+      "key": "mirror_seen",
+      "display_name": "거울을 자세히 봄",
+      "description": "낯선 거울을 자세히 조사했는지 나타냅니다.",
+      "default": false,
+      "aliases": ["거울을 봄"]
+    },
+    {
+      "kind": "flag",
+      "key": "showed_diary_key",
+      "display_name": "열쇠를 보여줌",
+      "description": "젤리뽀에게 교환일기 열쇠의 존재를 공개했는지 나타냅니다.",
+      "default": false,
+      "aliases": ["교환일기 열쇠를 보여줌"]
+    },
+    {
+      "kind": "stat",
+      "key": "jellyppo_trust",
+      "display_name": "젤리뽀의 신뢰",
+      "description": "젤리뽀와 레티 사이의 신뢰도입니다.",
+      "default": 0,
+      "minimum": -10,
+      "maximum": 10,
+      "aliases": []
+    },
+    {
+      "kind": "inventory",
+      "key": "exchange_diary_key",
+      "display_name": "교환일기 열쇠",
+      "description": "젤리뽀 관련 교환일기를 여는 열쇠입니다.",
+      "default": 0,
+      "minimum": 0,
+      "maximum": 1,
+      "aliases": ["일기 열쇠"]
+    },
+    {
+      "kind": "quest",
+      "key": "truth_investigation",
+      "display_name": "진실 조사",
+      "description": "진실을 조사하는 이야기 진행 단계입니다.",
+      "default": "not_started",
+      "stages": ["not_started", "started", "resolved"],
+      "aliases": ["진실을 조사함"]
+    }
+  ],
+  "triggers": [
+    {
+      "key": "mirror.inspect",
+      "display_name": "거울 조사",
+      "description": "거울을 조사할 때 사용하는 대화 트리거입니다.",
+      "aliases": ["거울 살피기"]
+    }
+  ],
+  "commands": []
+}
