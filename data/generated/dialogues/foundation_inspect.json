@@ -1,59 +1,59 @@
 {
-	"entry_node": "seen.start.line_2bcbc5c5b2cb",
+	"entry_node": "seen.start.line_c49886264acc",
 	"nodes": {
-		"default.hesitate.jump_b3173f01921d": {
-			"next": "default.rejoin.line_836876b3931a",
+		"default.hesitate.jump_3f2311aeeed1": {
+			"next": "default.rejoin.line_1ff0a81e84e3",
 			"type": "jump"
 		},
-		"default.hesitate.line_37cc52273716": {
+		"default.hesitate.line_c1485a7e796b": {
 			"expression": "uneasy",
-			"next": "default.hesitate.jump_b3173f01921d",
+			"next": "default.hesitate.jump_3f2311aeeed1",
 			"speaker": "retti",
 			"text": "지금은 가까이 가지 않는 편이 좋을지도 몰라.",
 			"type": "line"
 		},
-		"default.inspect.choice_e5adbac80116": {
+		"default.inspect.choice_bbb9512d8a42": {
 			"items": [
 				{
 					"conditions": [],
 					"effects": [],
-					"next": "default.start.line_1d0c644205ee",
+					"next": "default.start.line_3e595f7d0fcc",
 					"text": "처음부터 다시 생각한다"
 				},
 				{
 					"conditions": [],
 					"effects": [],
-					"next": "default.rejoin.line_836876b3931a",
+					"next": "default.rejoin.line_1ff0a81e84e3",
 					"text": "조사를 마친다"
 				}
 			],
 			"type": "choice"
 		},
-		"default.inspect.line_06c0a3811e59": {
-			"expression": "uneasy",
-			"next": "default.inspect.line_3ba3be09617e",
-			"speaker": "retti",
-			"text": "거울 속에는 이 방과 조금 다른 방이 비친다.",
-			"type": "line"
-		},
-		"default.inspect.line_3ba3be09617e": {
+		"default.inspect.line_64fc2f68fc53": {
 			"expression": "neutral",
-			"next": "default.inspect.choice_e5adbac80116",
+			"next": "default.inspect.choice_bbb9512d8a42",
 			"speaker": "retti",
 			"text": "조금 더 살펴볼까?",
 			"type": "line"
 		},
-		"default.rejoin.end_d8a8af5fbf3b": {
+		"default.inspect.line_e5b0e4bd5f23": {
+			"expression": "uneasy",
+			"next": "default.inspect.line_64fc2f68fc53",
+			"speaker": "retti",
+			"text": "거울 속에는 이 방과 조금 다른 방이 비친다.",
+			"type": "line"
+		},
+		"default.rejoin.end_3f9bb80da376": {
 			"type": "end"
 		},
-		"default.rejoin.line_836876b3931a": {
+		"default.rejoin.line_1ff0a81e84e3": {
 			"expression": "neutral",
-			"next": "default.rejoin.end_d8a8af5fbf3b",
+			"next": "default.rejoin.end_3f9bb80da376",
 			"speaker": "retti",
 			"text": "거울은 다시 조용해졌다.",
 			"type": "line"
 		},
-		"default.start.choice_4c348c8a3303": {
+		"default.start.choice_93440f2bd8ca": {
 			"items": [
 				{
 					"conditions": [],
@@ -64,38 +64,38 @@
 							"value": true
 						}
 					],
-					"next": "default.inspect.line_06c0a3811e59",
+					"next": "default.inspect.line_e5b0e4bd5f23",
 					"text": "거울을 자세히 본다"
 				},
 				{
 					"conditions": [],
 					"effects": [],
-					"next": "default.hesitate.line_37cc52273716",
+					"next": "default.hesitate.line_c1485a7e796b",
 					"text": "한 걸음 물러난다"
 				}
 			],
 			"type": "choice"
 		},
-		"default.start.line_1d0c644205ee": {
+		"default.start.line_3e595f7d0fcc": {
 			"expression": "neutral",
-			"next": "default.start.line_bd4f1d6314f3",
+			"next": "default.start.line_a894164c215c",
 			"speaker": "retti",
 			"text": "낯선 거울이다.",
 			"type": "line"
 		},
-		"default.start.line_bd4f1d6314f3": {
+		"default.start.line_a894164c215c": {
 			"expression": "uneasy",
-			"next": "default.start.choice_4c348c8a3303",
+			"next": "default.start.choice_93440f2bd8ca",
 			"speaker": "retti",
 			"text": "표면 안쪽에서 희미한 빛이 흔들린다.",
 			"type": "line"
 		},
-		"seen.start.end_366d92c719eb": {
+		"seen.start.end_40d66d90680e": {
 			"type": "end"
 		},
-		"seen.start.line_2bcbc5c5b2cb": {
+		"seen.start.line_c49886264acc": {
 			"expression": "neutral",
-			"next": "seen.start.end_366d92c719eb",
+			"next": "seen.start.end_40d66d90680e",
 			"speaker": "retti",
 			"text": "아까보다 평범한 거울처럼 보인다.",
 			"type": "line"
