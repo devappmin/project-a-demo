@@ -4,6 +4,7 @@ class_name NarrativeCatalog
 const DEFAULT_PATH := "res://data/narrative/narrative_catalog.json"
 const CONDITION_KINDS := [&"flag", &"stat", &"inventory", &"quest", &"collectible"]
 const MAPPING_STATUSES := [&"exact", &"approved"]
+const COMMAND_ARGUMENT_TYPES := [&"bool", &"int", &"float", &"string", &"dictionary", &"array"]
 
 var _terms_by_identity: Dictionary = {}
 var _triggers: Dictionary = {}
@@ -95,6 +96,9 @@ func _install_records(value: Variant, destination: Dictionary, label: String) ->
 			continue
 		if not _has_required_record_metadata(record):
 			_catalog_issues.append(_issue("invalid_%s_metadata" % label, "%s requires a text description and aliases" % label))
+			continue
+		if label == "command" and not _has_valid_command_arguments(record):
+			_catalog_issues.append(_issue("invalid_command_arguments", "command arguments must be a dictionary of supported named types"))
 			continue
 		if destination.has(key):
 			_catalog_issues.append(_issue("duplicate_%s" % label, "%s key is duplicated" % label))
@@ -207,6 +211,18 @@ func _has_required_term_metadata(term: Dictionary) -> bool:
 func _has_required_record_metadata(record: Dictionary) -> bool:
 	return record.has("description") and typeof(record["description"]) == TYPE_STRING and not String(record["description"]).is_empty() \
 		and record.has("aliases") and _has_valid_aliases(record["aliases"])
+
+func _has_valid_command_arguments(record: Dictionary) -> bool:
+	if not record.has("arguments"):
+		return true
+	var arguments: Variant = record["arguments"]
+	if typeof(arguments) != TYPE_DICTIONARY:
+		return false
+	for argument_name: Variant in (arguments as Dictionary).keys():
+		var type_name: Variant = (arguments as Dictionary)[argument_name]
+		if typeof(argument_name) != TYPE_STRING or String(argument_name).is_empty() or typeof(type_name) != TYPE_STRING or StringName(type_name) not in COMMAND_ARGUMENT_TYPES:
+			return false
+	return true
 
 func _has_valid_numeric_bounds(term: Dictionary) -> bool:
 	var minimum: Variant = term.get("minimum", null)

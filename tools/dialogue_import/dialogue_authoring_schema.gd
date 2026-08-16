@@ -11,14 +11,36 @@ static func validate_bundle(bundle: Dictionary, catalog: NarrativeCatalog, chara
 	if typeof(triggers_value) != TYPE_ARRAY or triggers_value.is_empty():
 		_add_issue(issues, "error", "missing_triggers", "bundle requires one or more triggers", context)
 		return issues
+	var event_keys := _bundle_event_keys(triggers_value, context, issues)
 	for trigger_value: Variant in triggers_value:
 		if typeof(trigger_value) != TYPE_DICTIONARY:
 			_add_issue(issues, "error", "invalid_trigger", "trigger must be a dictionary", context)
 			continue
-		_validate_trigger(trigger_value, catalog, characters, context, issues)
+		_validate_trigger(trigger_value, event_keys, catalog, characters, context, issues)
 	return issues
 
-static func _validate_trigger(trigger: Dictionary, catalog: NarrativeCatalog, characters: Resource, bundle_context: Dictionary, issues: Array[Dictionary]) -> void:
+static func _bundle_event_keys(triggers: Array, bundle_context: Dictionary, issues: Array[Dictionary]) -> Dictionary:
+	var event_keys: Dictionary = {}
+	for trigger_value: Variant in triggers:
+		if typeof(trigger_value) != TYPE_DICTIONARY:
+			continue
+		var trigger_context := _context(trigger_value, bundle_context)
+		var events_value: Variant = (trigger_value as Dictionary).get("events", null)
+		if typeof(events_value) != TYPE_ARRAY:
+			continue
+		for event_value: Variant in events_value:
+			if typeof(event_value) != TYPE_DICTIONARY:
+				continue
+			var event_key := String((event_value as Dictionary).get("event_key", ""))
+			if event_key.is_empty():
+				continue
+			if event_keys.has(event_key):
+				_add_issue(issues, "error", "duplicate_event_key", "event_key must be unique within its bundle", _context(event_value, trigger_context))
+			else:
+				event_keys[event_key] = true
+	return event_keys
+
+static func _validate_trigger(trigger: Dictionary, event_keys: Dictionary, catalog: NarrativeCatalog, characters: Resource, bundle_context: Dictionary, issues: Array[Dictionary]) -> void:
 	var context := _context(trigger, bundle_context)
 	_validate_required_text(trigger, "source_id", context, issues)
 	var trigger_key := String(trigger.get("trigger_key", ""))
@@ -30,22 +52,12 @@ static func _validate_trigger(trigger: Dictionary, catalog: NarrativeCatalog, ch
 	if typeof(events_value) != TYPE_ARRAY or events_value.is_empty():
 		_add_issue(issues, "error", "missing_events", "trigger requires one or more events", context)
 		return
-	var event_keys: Dictionary = {}
-	for event_value: Variant in events_value:
-		if typeof(event_value) != TYPE_DICTIONARY:
-			_add_issue(issues, "error", "invalid_event", "event must be a dictionary", context)
-			continue
-		var event_key := String(event_value.get("event_key", ""))
-		if event_key.is_empty():
-			_add_issue(issues, "error", "missing_event_key", "event requires event_key", _context(event_value, context))
-		elif event_keys.has(event_key):
-			_add_issue(issues, "error", "duplicate_event_key", "event_key must be unique within its trigger", _context(event_value, context))
-		else:
-			event_keys[event_key] = true
 	for event_index: int in events_value.size():
 		var event_value: Variant = events_value[event_index]
 		if typeof(event_value) == TYPE_DICTIONARY:
 			_validate_event(event_value, event_keys, catalog, characters, context, issues)
+		else:
+			_add_issue(issues, "error", "invalid_event", "event must be a dictionary", context)
 	if typeof(events_value[events_value.size() - 1]) == TYPE_DICTIONARY and not (events_value[events_value.size() - 1] as Dictionary).get("conditions", []).is_empty():
 		_add_issue(issues, "warning", "missing_fallback", "the final event should be an unconditional fallback", _context(events_value[events_value.size() - 1], context))
 
@@ -118,7 +130,7 @@ static func _validate_block(block: Dictionary, block_index: int, block_count: in
 		"jump":
 			_validate_target(block, flow_keys, event_keys, context, issues)
 		"end":
-			pass
+			_validate_end(block, context, issues)
 		_:
 			_add_issue(issues, "error", "unsupported_block_type", "block type is not supported", context)
 
@@ -131,6 +143,12 @@ static func _validate_line(block: Dictionary, characters: Resource, context: Dic
 		_add_issue(issues, "error", "unknown_expression", "line expression is not registered for its speaker", context)
 	if typeof(block.get("text", null)) != TYPE_STRING or String(block.get("text", "")).is_empty():
 		_add_issue(issues, "error", "missing_line_text", "line requires text", context)
+
+static func _validate_end(block: Dictionary, context: Dictionary, issues: Array[Dictionary]) -> void:
+	for field: Variant in block.keys():
+		if field not in ["type", "source_id", "comments"]:
+			_add_issue(issues, "error", "invalid_end_block", "end blocks allow only type, source_id, and comments", context)
+			return
 
 static func _validate_choice(block: Dictionary, flow_keys: Dictionary, event_keys: Dictionary, catalog: NarrativeCatalog, context: Dictionary, issues: Array[Dictionary]) -> void:
 	var items_value: Variant = block.get("items", null)
@@ -182,6 +200,9 @@ static func _validate_command(block: Dictionary, catalog: NarrativeCatalog, cont
 			_add_issue(issues, "error", "unapproved_command_argument", "command argument is not allowed by the narrative catalog", context)
 		elif not _matches_argument_type((arguments as Dictionary)[argument_key], String((allowed as Dictionary)[argument_key])):
 			_add_issue(issues, "error", "invalid_command_argument_type", "command argument does not match the narrative catalog type", context)
+	for allowed_key: Variant in (allowed as Dictionary).keys():
+		if not (arguments as Dictionary).has(allowed_key):
+			_add_issue(issues, "error", "missing_command_argument", "command argument required by the narrative catalog is missing", context)
 
 static func _matches_argument_type(value: Variant, type_name: String) -> bool:
 	match type_name:

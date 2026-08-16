@@ -19,6 +19,8 @@ func run() -> void:
 	_test_identity(identity)
 	_test_stable_identity_through_comments_and_renames(identity, schema, fixture, catalog, characters)
 	_test_contract_failures(schema, fixture, catalog, characters)
+	_test_same_bundle_cross_trigger_event_target(schema, fixture, characters)
+	_test_command_argument_contract(schema, fixture, characters)
 
 func _test_identity(identity: Script) -> void:
 	assert_eq(identity.stable_key("flow", "notion-flow-start", "start"), "start", "safe retained key wins")
@@ -58,11 +60,34 @@ func _test_contract_failures(schema: Script, fixture: Script, catalog: Narrative
 	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][0]["flow_key"] = "opening", "missing_start_flow")
 	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][3]["blocks"] = [_line_without_exit()], "unterminated_path")
 	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][1]["blocks"][1]["arguments"]["speed"] = "fast", "invalid_command_argument_type")
+	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][3]["blocks"][1]["text"] = "forbidden", "invalid_end_block")
 	var no_fallback: Dictionary = fixture.valid_bundle()
 	no_fallback["triggers"][0]["events"][1]["conditions"] = [no_fallback["triggers"][0]["events"][0]["conditions"][0]]
 	var warnings: Array = schema.validate_bundle(no_fallback, catalog, characters)
 	assert_true(_has_issue(warnings, "missing_fallback", "warning"), "final conditional event produces a missing-fallback warning")
 	assert_false(_has_error(warnings), "missing fallback is not an error")
+
+func _test_same_bundle_cross_trigger_event_target(schema: Script, fixture: Script, characters: Resource) -> void:
+	var bundle: Dictionary = fixture.valid_bundle()
+	var second_trigger: Dictionary = bundle["triggers"][0].duplicate(true)
+	second_trigger["source_id"] = "notion-heading-door"
+	second_trigger["trigger_key"] = "door.inspect"
+	second_trigger["name"] = "문 조사"
+	second_trigger["events"] = [{"source_id":"notion-event-door", "event_key":"door_default", "name":"문 앞", "conditions":[], "effects":[], "flows":[{"source_id":"notion-flow-door", "flow_key":"start", "name":"흐름 · 시작", "effects":[], "blocks":[{"type":"end", "source_id":"notion-block-door-end"}]}]}]
+	bundle["triggers"].append(second_trigger)
+	bundle["triggers"][0]["events"][1]["flows"][0]["blocks"][2]["items"][0]["target_kind"] = "event"
+	bundle["triggers"][0]["events"][1]["flows"][0]["blocks"][2]["items"][0]["target_key"] = "door_default"
+	assert_eq(schema.validate_bundle(bundle, NarrativeCatalog.from_dictionary(_catalog_data()), characters), [], "event target may resolve to another trigger in the same bundle")
+	var duplicate_key_bundle: Dictionary = bundle.duplicate(true)
+	duplicate_key_bundle["triggers"][1]["events"][0]["event_key"] = "default"
+	assert_true(_has_issue(schema.validate_bundle(duplicate_key_bundle, NarrativeCatalog.from_dictionary(_catalog_data()), characters), "duplicate_event_key", "error"), "event keys remain unique across the complete bundle")
+
+func _test_command_argument_contract(schema: Script, fixture: Script, characters: Resource) -> void:
+	var valid_catalog := NarrativeCatalog.from_dictionary(_catalog_data())
+	assert_eq(schema.validate_bundle(fixture.valid_bundle(), valid_catalog, characters), [], "complete typed command arguments validate")
+	_assert_issue(schema, fixture, valid_catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][1]["blocks"][1]["arguments"].erase("speed"), "missing_command_argument")
+	_assert_issue(schema, fixture, valid_catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][1]["blocks"][1]["arguments"]["extra"] = true, "unapproved_command_argument")
+	_assert_issue(schema, fixture, valid_catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][1]["blocks"][1]["arguments"]["speed"] = "fast", "invalid_command_argument_type")
 
 func _line_without_exit() -> Dictionary:
 	return {"type":"line", "source_id":"notion-block-unterminated", "speaker":"retti", "expression":"neutral", "text":"끝나지 않는 말"}
@@ -88,4 +113,4 @@ func _has_error(issues: Array) -> bool:
 	return false
 
 func _catalog_data() -> Dictionary:
-	return {"schema_version":1, "terms":[{"kind":"flag", "key":"mirror_seen", "display_name":"거울을 자세히 봄", "description":"거울 상태", "aliases":[], "default":false}, {"kind":"stat", "key":"jellyppo_trust", "display_name":"젤리뽀의 신뢰", "description":"신뢰", "aliases":[], "default":0, "minimum":-10, "maximum":10}], "triggers":[{"key":"mirror.inspect", "display_name":"거울 조사", "description":"거울", "aliases":[]}], "commands":[{"key":"dialogue.advance", "display_name":"대화 진행", "description":"대화", "aliases":[], "arguments":{"speed":"int"}}]}
+	return {"schema_version":1, "terms":[{"kind":"flag", "key":"mirror_seen", "display_name":"거울을 자세히 봄", "description":"거울 상태", "aliases":[], "default":false}, {"kind":"stat", "key":"jellyppo_trust", "display_name":"젤리뽀의 신뢰", "description":"신뢰", "aliases":[], "default":0, "minimum":-10, "maximum":10}], "triggers":[{"key":"mirror.inspect", "display_name":"거울 조사", "description":"거울", "aliases":[]}, {"key":"door.inspect", "display_name":"문 조사", "description":"문", "aliases":[]}], "commands":[{"key":"dialogue.advance", "display_name":"대화 진행", "description":"대화", "aliases":[], "arguments":{"speed":"int"}}]}

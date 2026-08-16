@@ -58,6 +58,12 @@ func _test_required_authoring_metadata(catalog_script: Script) -> void:
 	var command_without_aliases := _catalog_data()
 	_record(command_without_aliases, "commands", 0).erase("aliases")
 	_assert_invalid_catalog(catalog_script, command_without_aliases, "command aliases are required")
+	var command_with_non_dictionary_arguments := _catalog_data()
+	_record(command_with_non_dictionary_arguments, "commands", 0)["arguments"] = ["speed"]
+	_assert_invalid_catalog(catalog_script, command_with_non_dictionary_arguments, "command arguments must be a dictionary when provided")
+	var command_with_unsupported_argument_type := _catalog_data()
+	_record(command_with_unsupported_argument_type, "commands", 0)["arguments"] = {"speed":"number"}
+	_assert_invalid_catalog(catalog_script, command_with_unsupported_argument_type, "command argument type must be supported")
 
 func _assert_invalid_catalog(catalog_script: Script, data: Dictionary, message: String) -> void:
 	var malformed_catalog: RefCounted = catalog_script.from_dictionary(data)
@@ -77,4 +83,4 @@ func _catalog_data() -> Dictionary:
 		{"kind":"flag", "key":"mirror_seen", "display_name":"거울을 자세히 봄", "description":"거울을 조사했는지 나타냅니다.", "aliases":["거울을 봄"], "default":false},
 		{"kind":"stat", "key":"jellyppo_trust", "display_name":"젤리뽀의 신뢰", "description":"신뢰도입니다.", "aliases":[], "default":0, "minimum":-10, "maximum":10},
 		{"kind":"inventory", "key":"diary_key", "display_name":"열쇠", "description":"일기를 여는 열쇠입니다.", "aliases":[], "default":0, "minimum":0, "maximum":1}
-	], "triggers":[{"key":"mirror.inspect", "display_name":"거울 조사", "description":"거울을 조사합니다.", "aliases":[]}], "commands":[{"key":"dialogue.advance", "display_name":"대화 진행", "description":"다음 대사로 진행합니다.", "aliases":[]}]}
+	], "triggers":[{"key":"mirror.inspect", "display_name":"거울 조사", "description":"거울을 조사합니다.", "aliases":[]}], "commands":[{"key":"dialogue.advance", "display_name":"대화 진행", "description":"다음 대사로 진행합니다.", "aliases":[], "arguments":{"speed":"int"}}]}
