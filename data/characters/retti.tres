@@ -17,3 +17,4 @@ character_key = &"retti"
 display_name = "레티"
 default_expression = &"neutral"
 portraits = {&"neutral": SubResource("Atlas_neutral"), &"uneasy": SubResource("Atlas_uneasy")}
+expression_metadata = {&"neutral": {"display_name": "무표정", "aliases": ["평온"]}, &"uneasy": {"display_name": "불안", "aliases": ["걱정"]}}

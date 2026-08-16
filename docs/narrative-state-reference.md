@@ -28,7 +28,7 @@
 ## 퀘스트
 ### 진실 조사 (`truth_investigation`)
 진실을 조사하는 이야기 진행 단계입니다.
-- 기본값: not_started; 단계: not_started, started, resolved
+- 기본값: not_started; 단계: 시작 전 (`not_started`) — 별칭: 아직 시작하지 않음, 조사 중 (`started`) — 별칭: 진행 중, 조사 완료 (`resolved`) — 별칭: 완료
 - 별칭: 진실을 조사함
 
 
@@ -45,5 +45,5 @@
 - 등록된 항목이 없습니다.
 
 ## 등장인물과 표정
-- 젤리포 (`jellyppo`): neutral, uneasy
-- 레티 (`retti`): neutral, uneasy
+- 젤리포 (`jellyppo`): 무표정 (`neutral`) — 별칭: 평온, 불안 (`uneasy`) — 별칭: 당황
+- 레티 (`retti`): 무표정 (`neutral`) — 별칭: 평온, 불안 (`uneasy`) — 별칭: 걱정

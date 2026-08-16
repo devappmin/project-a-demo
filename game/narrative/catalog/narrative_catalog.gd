@@ -10,6 +10,7 @@ var _terms_by_identity: Dictionary = {}
 var _triggers: Dictionary = {}
 var _commands: Dictionary = {}
 var _catalog_issues: Array[Dictionary] = []
+var _human_phrases_by_category: Dictionary = {}
 
 static func load_default() -> NarrativeCatalog:
 	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(DEFAULT_PATH))
@@ -78,6 +79,10 @@ func _install_terms(value: Variant) -> void:
 		if _terms_by_identity.has(identity):
 			_catalog_issues.append(_issue("duplicate_term", "term key is duplicated for its kind"))
 			continue
+		if kind == "quest" and not _reserve_quest_stage_phrases(term):
+			continue
+		if not _reserve_human_phrases(term, kind):
+			continue
 		_terms_by_identity[identity] = term.duplicate(true)
 
 func _install_records(value: Variant, destination: Dictionary, label: String) -> void:
@@ -102,6 +107,8 @@ func _install_records(value: Variant, destination: Dictionary, label: String) ->
 			continue
 		if destination.has(key):
 			_catalog_issues.append(_issue("duplicate_%s" % label, "%s key is duplicated" % label))
+			continue
+		if not _reserve_human_phrases(record, label):
 			continue
 		destination[key] = record.duplicate(true)
 
@@ -236,9 +243,46 @@ func _has_valid_stages(term: Dictionary) -> bool:
 	var stages: Variant = term.get("stages", null)
 	if typeof(stages) != TYPE_ARRAY or stages.is_empty():
 		return false
+	var stage_keys: Dictionary = {}
 	for stage: Variant in stages:
-		if typeof(stage) != TYPE_STRING or String(stage).is_empty():
+		if typeof(stage) != TYPE_STRING or String(stage).is_empty() or stage_keys.has(String(stage)):
 			return false
+		stage_keys[String(stage)] = true
+	var metadata: Variant = term.get("stage_metadata", null)
+	if typeof(metadata) != TYPE_ARRAY or metadata.size() != stages.size():
+		return false
+	var metadata_keys: Dictionary = {}
+	for record_value: Variant in metadata:
+		if typeof(record_value) != TYPE_DICTIONARY:
+			return false
+		var record: Dictionary = record_value
+		var key := String(record.get("key", ""))
+		if not stage_keys.has(key) or metadata_keys.has(key) or typeof(record.get("display_name", null)) != TYPE_STRING or String(record.get("display_name", "")).is_empty() or not _has_valid_aliases(record.get("aliases", null)):
+			return false
+		metadata_keys[key] = true
+	return metadata_keys.size() == stage_keys.size()
+
+func _reserve_quest_stage_phrases(term: Dictionary) -> bool:
+	var category := "quest_stage:%s" % String(term.get("key", ""))
+	for stage_value: Variant in term.get("stage_metadata", []):
+		if not _reserve_human_phrases(stage_value, category):
+			return false
+	return true
+
+func _reserve_human_phrases(record: Dictionary, category: String) -> bool:
+	var phrases: Array[String] = [String(record.get("display_name", ""))]
+	for alias: Variant in record.get("aliases", []):
+		phrases.append(String(alias))
+	var local_phrases: Dictionary = {}
+	var registered: Dictionary = _human_phrases_by_category.get(category, {})
+	for phrase: String in phrases:
+		if phrase.is_empty() or local_phrases.has(phrase) or registered.has(phrase):
+			_catalog_issues.append(_issue("ambiguous_human_phrase", "Korean display names and aliases must be unique within category %s" % category))
+			return false
+		local_phrases[phrase] = true
+	for phrase: String in phrases:
+		registered[phrase] = String(record.get("key", ""))
+	_human_phrases_by_category[category] = registered
 	return true
 
 func _is_within_bounds(value: Variant, term: Dictionary) -> bool:

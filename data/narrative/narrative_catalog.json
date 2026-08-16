@@ -44,6 +44,11 @@
       "description": "진실을 조사하는 이야기 진행 단계입니다.",
       "default": "not_started",
       "stages": ["not_started", "started", "resolved"],
+      "stage_metadata": [
+        {"key": "not_started", "display_name": "시작 전", "aliases": ["아직 시작하지 않음"]},
+        {"key": "started", "display_name": "조사 중", "aliases": ["진행 중"]},
+        {"key": "resolved", "display_name": "조사 완료", "aliases": ["완료"]}
+      ],
       "aliases": ["진실을 조사함"]
     }
   ],

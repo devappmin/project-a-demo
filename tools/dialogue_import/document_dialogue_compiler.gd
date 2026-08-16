@@ -19,6 +19,12 @@ static func compile_bundles(bundles: Array[Dictionary], catalog: NarrativeCatalo
 	var ordered_bundles: Array[Dictionary] = bundles.duplicate(true)
 	for catalog_issue: Dictionary in local_catalog.validate_catalog():
 		issues.append(_issue("error", String(catalog_issue.get("code", "invalid_catalog")), String(catalog_issue.get("message", "narrative catalog is invalid")), {}, ""))
+	if local_characters == null or not local_characters.has_method("validate_authoring_metadata"):
+		issues.append(_issue("error", "invalid_character_metadata", "character registry cannot validate Korean authoring metadata", {}, ""))
+	else:
+		for character_issue_value: Variant in local_characters.call("validate_authoring_metadata"):
+			var character_issue: Dictionary = character_issue_value
+			issues.append(_issue("error", String(character_issue.get("code", "invalid_character_metadata")), String(character_issue.get("message", "character authoring metadata is invalid")), {}, ""))
 	if _has_errors(issues):
 		return _compile_result(graphs, event_bundles, source_entries, issues)
 	ordered_bundles.sort_custom(_bundle_less)

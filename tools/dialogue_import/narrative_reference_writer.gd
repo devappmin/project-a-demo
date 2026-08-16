@@ -65,10 +65,17 @@ static func _record_details(record: Dictionary, category: String) -> Array[Strin
 	if category == "stat" or category == "inventory" or category == "collectible":
 		details.append("범위: %s ~ %s" % [_value_text(record.get("minimum", "")), _value_text(record.get("maximum", ""))])
 	if category == "quest":
-		var stages: Array = record.get("stages", [])
 		var stage_text: Array[String] = []
-		for stage: Variant in stages:
-			stage_text.append(String(stage))
+		for stage_value: Variant in record.get("stage_metadata", []):
+			var stage: Dictionary = stage_value
+			var text := "%s (`%s`)" % [String(stage.get("display_name", "")), String(stage.get("key", ""))]
+			var stage_aliases: Array[String] = []
+			for alias: Variant in stage.get("aliases", []):
+				stage_aliases.append(String(alias))
+			stage_aliases.sort()
+			if not stage_aliases.is_empty():
+				text += " — 별칭: %s" % ", ".join(stage_aliases)
+			stage_text.append(text)
 		details.append("단계: %s" % ", ".join(stage_text))
 	return details
 
@@ -91,12 +98,19 @@ static func _append_characters(lines: PackedStringArray, characters: Resource) -
 		lines.append("- 등록된 등장인물이 없습니다.")
 
 static func _expression_names(definition: Resource) -> Array[String]:
-	var portraits: Variant = definition.get("portraits")
-	if typeof(portraits) != TYPE_DICTIONARY:
+	if not definition.has_method("expression_records"):
 		return []
 	var names: Array[String] = []
-	for expression: Variant in portraits.keys():
-		names.append(String(expression))
+	for record_value: Variant in definition.call("expression_records"):
+		var record: Dictionary = record_value
+		var text := "%s (`%s`)" % [String(record.get("display_name", "")), String(record.get("key", ""))]
+		var aliases: Array[String] = []
+		for alias: Variant in record.get("aliases", []):
+			aliases.append(String(alias))
+		aliases.sort()
+		if not aliases.is_empty():
+			text += " — 별칭: %s" % ", ".join(aliases)
+		names.append(text)
 	names.sort()
 	return names
 

@@ -19,6 +19,9 @@ func run() -> void:
 	if registry_script == null or production_registry == null:
 		return
 	assert_eq(production_registry.call("character_keys"), [&"jellyppo", &"retti"], "production registry is the single sorted retti/jellyppo catalog")
+	assert_true(production_registry.has_method("validate_authoring_metadata"), "character registry validates Korean authoring metadata")
+	if production_registry.has_method("validate_authoring_metadata"):
+		assert_eq(production_registry.call("validate_authoring_metadata"), [], "production character and expression names are unambiguous")
 	var injected_registry: Resource = _injected_registry(registry_script)
 	assert_not_null(injected_registry, "test registry can be injected")
 	if injected_registry == null:
@@ -33,6 +36,24 @@ func run() -> void:
 	await _test_loader_uses_registry(production_registry, injected_registry)
 	await _test_view_uses_registry(production_registry, injected_registry)
 	_test_compiler_validates_character_registry(production_registry, injected_registry)
+	_test_ambiguous_expression_metadata_blocks_compilation(registry_script)
+
+func _test_ambiguous_expression_metadata_blocks_compilation(registry_script: Script) -> void:
+	var ambiguous_registry: Resource = _injected_registry(registry_script)
+	var definitions: Array = ambiguous_registry.get("definitions")
+	var definition: Resource = definitions[0]
+	definition.set("expression_metadata", {
+		&"neutral":{"display_name":"평온", "aliases":[]},
+		&"uneasy":{"display_name":"불안", "aliases":["평온"]},
+	})
+	var compiler: Script = load(COMPILER_PATH)
+	var fixture_factory: Script = load(FIXTURE_FACTORY_PATH)
+	var bundle: Dictionary = _importable_bundle(fixture_factory)
+	_replace_line_identity(bundle, "test_hero", "neutral")
+	var bundles: Array[Dictionary] = [bundle]
+	var result: Dictionary = compiler.call("compile_bundles", bundles, null, ambiguous_registry)
+	assert_false(result.get("ok", true), "ambiguous Korean expression phrases block compilation")
+	assert_true(_has_issue(result.get("issues", []), "ambiguous_expression_phrase", ""), "expression ambiguity has a stable compiler diagnostic")
 
 func _test_loader_uses_registry(production_registry: Resource, injected_registry: Resource) -> void:
 	var loader_script: Script = load(LOADER_PATH)
@@ -131,6 +152,7 @@ func _injected_registry(registry_script: Script) -> Resource:
 	definition.set("display_name", "테스트 영웅")
 	definition.set("default_expression", &"neutral")
 	definition.set("portraits", {&"neutral":null, &"uneasy":null})
+	definition.set("expression_metadata", {&"neutral":{"display_name":"평온", "aliases":[]}, &"uneasy":{"display_name":"불안", "aliases":[]}})
 	var registry: Resource = registry_script.new()
 	var definitions: Array[Resource] = [definition]
 	registry.set("definitions", definitions)

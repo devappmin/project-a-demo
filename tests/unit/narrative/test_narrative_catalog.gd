@@ -20,6 +20,7 @@ func run() -> void:
 	var contained: Dictionary = catalog.validate_condition({"source_text":"열쇠를 가짐", "term_name":"열쇠", "mapping_status":"exact", "kind":"inventory", "key":"diary_key", "operator":"contains", "value":true})
 	assert_true(contained["ok"], "inventory contains condition accepts a boolean")
 	_test_required_authoring_metadata(catalog_script)
+	_test_human_phrase_uniqueness(catalog_script)
 
 func _test_required_authoring_metadata(catalog_script: Script) -> void:
 	var missing_term_description := _catalog_data()
@@ -64,11 +65,36 @@ func _test_required_authoring_metadata(catalog_script: Script) -> void:
 	var command_with_unsupported_argument_type := _catalog_data()
 	_record(command_with_unsupported_argument_type, "commands", 0)["arguments"] = {"speed":"number"}
 	_assert_invalid_catalog(catalog_script, command_with_unsupported_argument_type, "command argument type must be supported")
+	var quest_without_stage_metadata := _catalog_data()
+	_term(quest_without_stage_metadata, 3).erase("stage_metadata")
+	_assert_invalid_catalog(catalog_script, quest_without_stage_metadata, "quest stages require Korean display metadata")
+
+func _test_human_phrase_uniqueness(catalog_script: Script) -> void:
+	var duplicate_term_phrase := _catalog_data()
+	duplicate_term_phrase["terms"].append({"kind":"flag", "key":"second_flag", "display_name":"두 번째 상태", "description":"다른 상태입니다.", "aliases":["거울을 자세히 봄"], "default":false})
+	_assert_catalog_issue(catalog_script, duplicate_term_phrase, "ambiguous_human_phrase", "term names and aliases are unique within one state category")
+	var cross_category_phrase := _catalog_data()
+	_term(cross_category_phrase, 1)["aliases"] = ["거울을 자세히 봄"]
+	assert_eq(catalog_script.from_dictionary(cross_category_phrase).validate_catalog(), [], "the same phrase may exist in distinct state categories")
+	var duplicate_trigger_phrase := _catalog_data()
+	duplicate_trigger_phrase["triggers"].append({"key":"door.inspect", "display_name":"문 조사", "description":"문을 조사합니다.", "aliases":["거울 조사"]})
+	_assert_catalog_issue(catalog_script, duplicate_trigger_phrase, "ambiguous_human_phrase", "trigger names and aliases cannot map to multiple keys")
+	var duplicate_stage_phrase := _catalog_data()
+	_term(duplicate_stage_phrase, 3)["stage_metadata"][1]["aliases"] = ["시작 전"]
+	_assert_catalog_issue(catalog_script, duplicate_stage_phrase, "ambiguous_human_phrase", "quest-stage names and aliases are unique within one quest")
 
 func _assert_invalid_catalog(catalog_script: Script, data: Dictionary, message: String) -> void:
 	var malformed_catalog: RefCounted = catalog_script.from_dictionary(data)
 	var issues: Array = malformed_catalog.validate_catalog()
 	assert_false(issues.is_empty(), message)
+
+func _assert_catalog_issue(catalog_script: Script, data: Dictionary, code: String, message: String) -> void:
+	var issues: Array = catalog_script.from_dictionary(data).validate_catalog()
+	for issue_value: Variant in issues:
+		if typeof(issue_value) == TYPE_DICTIONARY and String(issue_value.get("code", "")) == code:
+			assert_true(true, message)
+			return
+	assert_true(false, message)
 
 func _term(data: Dictionary, index: int) -> Dictionary:
 	var terms: Array = data["terms"]
@@ -82,5 +108,6 @@ func _catalog_data() -> Dictionary:
 	return {"schema_version":1, "terms":[
 		{"kind":"flag", "key":"mirror_seen", "display_name":"거울을 자세히 봄", "description":"거울을 조사했는지 나타냅니다.", "aliases":["거울을 봄"], "default":false},
 		{"kind":"stat", "key":"jellyppo_trust", "display_name":"젤리뽀의 신뢰", "description":"신뢰도입니다.", "aliases":[], "default":0, "minimum":-10, "maximum":10},
-		{"kind":"inventory", "key":"diary_key", "display_name":"열쇠", "description":"일기를 여는 열쇠입니다.", "aliases":[], "default":0, "minimum":0, "maximum":1}
+		{"kind":"inventory", "key":"diary_key", "display_name":"열쇠", "description":"일기를 여는 열쇠입니다.", "aliases":[], "default":0, "minimum":0, "maximum":1},
+		{"kind":"quest", "key":"truth_investigation", "display_name":"진실 조사", "description":"진실을 조사합니다.", "aliases":[], "default":"not_started", "stages":["not_started", "started"], "stage_metadata":[{"key":"not_started", "display_name":"시작 전", "aliases":["아직 시작하지 않음"]}, {"key":"started", "display_name":"조사 중", "aliases":["진행 중"]}]}
 	], "triggers":[{"key":"mirror.inspect", "display_name":"거울 조사", "description":"거울을 조사합니다.", "aliases":[]}], "commands":[{"key":"dialogue.advance", "display_name":"대화 진행", "description":"다음 대사로 진행합니다.", "aliases":[], "arguments":{"speed":"int"}}]}
