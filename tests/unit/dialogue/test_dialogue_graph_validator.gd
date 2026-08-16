@@ -18,6 +18,7 @@ func run() -> void:
 	_validate_fixture_contract(validator)
 	_validate_schema_and_node_contract(validator)
 	_validate_rule_shapes(validator)
+	_validate_choice_autosave(validator)
 	_validate_event_entries(validator)
 	_validate_reachable_cycles(validator)
 	_validate_automatic_path_limit(validator)
@@ -112,6 +113,17 @@ func _validate_rule_shapes(validator: Variant) -> void:
 	var mismatch_issues: Array = _validate(validator, runtime_mismatch, [&"retti"])
 	assert_eq(_count_code(mismatch_issues, "invalid_condition"), 4, "validator rejects every condition StringName that runtime rejects")
 	assert_eq(_count_code(mismatch_issues, "invalid_effect"), 3, "validator rejects every effect StringName that runtime rejects")
+
+func _validate_choice_autosave(validator: Variant) -> void:
+	for autosave_value: Variant in [true, false]:
+		var valid := _choice_graph()
+		valid["nodes"]["choice"]["autosave"] = autosave_value
+		assert_false(_has_code_at(_validate(validator, valid, [&"retti"]), "invalid_autosave", "choice"), "choice autosave accepts Boolean values")
+	for autosave_value: Variant in ["true", 1]:
+		var invalid := _choice_graph()
+		invalid["nodes"]["choice"]["autosave"] = autosave_value
+		assert_true(_has_code_at(_validate(validator, invalid, [&"retti"]), "invalid_autosave", "choice"), "choice autosave rejects non-Boolean runtime values")
+	assert_false(_has_code_at(_validate(validator, _choice_graph(), [&"retti"]), "invalid_autosave", "choice"), "choice autosave may be absent")
 
 func _validate_event_entries(validator: Variant) -> void:
 	var method_info := {}
@@ -288,6 +300,17 @@ func _minimal_graph() -> Dictionary:
 		"scene_key": "minimal",
 		"entry_node": "end",
 		"nodes": {"end": {"type":"end"}}
+	}
+
+func _choice_graph() -> Dictionary:
+	return {
+		"schema_version":1,
+		"scene_key":"choice.autosave",
+		"entry_node":"choice",
+		"nodes":{
+			"choice":{"type":"choice", "items":[{"text":"continue", "conditions":[], "effects":[], "next":"end"}]},
+			"end":{"type":"end"},
+		},
 	}
 
 func _automatic_graph(scene_key: String, automatic_count: int) -> Dictionary:

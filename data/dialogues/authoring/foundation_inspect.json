@@ -88,6 +88,7 @@
                 {
                   "type": "choice",
                   "source_id": "local:0f2f3999-6b5b-4be9-bcf7-9b2c27fd85ab",
+                  "autosave": true,
                   "items": [
                     {
                       "source_id": "local:c71242bb-73b7-473b-8074-c4989429586a",

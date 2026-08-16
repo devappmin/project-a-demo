@@ -63,6 +63,7 @@ func _assert_published_semantics(bundle: Dictionary, output_dir: String) -> void
 		generated_text += FileAccess.get_file_as_string(output_dir.path_join(filename))
 	for comment: String in comments:
 		assert_false(generated_text.contains(comment), "current fixture comments never enter generated artifacts")
+	_assert_single_important_choice(_read_dictionary(output_dir.path_join("foundation_inspect.json")))
 	_assert_source_map_is_one_to_one(bundle, _read_dictionary(output_dir.path_join("source_map.json")))
 	var event_index := EventIndex.load_path(output_dir.path_join("events.json"))
 	assert_true(event_index.is_valid(), "published event index loads")
@@ -102,7 +103,12 @@ func _play_default_route(output_dir: String, event_index: RefCounted, first_targ
 	service.narrative_state = state
 	service.game_session = GameSession
 	var choice_count := [0]
+	var stable_count := [0]
 	service.choices_requested.connect(func(_items: Array[Dictionary]) -> void: choice_count[0] += 1)
+	service.stable_checkpoint_reached.connect(func(kind: StringName, _checkpoint: Dictionary) -> void:
+		if kind == &"important_choice":
+			stable_count[0] += 1
+	)
 	get_tree().root.add_child(service)
 	assert_eq(service.start_dialogue(fallback["scene_key"], fallback["node_id"]), OK, "fallback starts at its resolved entry")
 	assert_eq(_current_node_type(service), "line", "fallback starts on a semantic line boundary")
@@ -118,6 +124,7 @@ func _play_default_route(output_dir: String, event_index: RefCounted, first_targ
 	if first_choice_index < 0:
 		return await _cleanup_route(service, state, &"")
 	assert_eq(service.choose(first_choice_index), OK, "selected first branch starts")
+	assert_eq(stable_count[0], 1, "generated important choice emits one stable checkpoint")
 	var rejoin_node := &""
 	if inspect_route:
 		assert_true(state.get_flag(&"mirror_seen"), "inspect choice applies its catalog effect before the destination")
@@ -135,6 +142,7 @@ func _play_default_route(output_dir: String, event_index: RefCounted, first_targ
 		assert_true(rejoin_index >= 0, "second choice exposes the shared rejoin destination")
 		if rejoin_index >= 0:
 			assert_eq(service.choose(rejoin_index), OK, "inspect branch selects its rejoin route")
+			assert_eq(stable_count[0], 1, "ordinary later choice emits no additional stable checkpoint")
 	else:
 		assert_false(state.get_flag(&"mirror_seen"), "hesitate branch does not apply the inspect choice effect")
 		assert_true(String(service.current_node_id).begins_with("default.hesitate."), "hesitate choice enters its retained flow destination")
@@ -191,6 +199,19 @@ func _assert_source_map_is_one_to_one(bundle: Dictionary, source_map: Dictionary
 	assert_eq(mapped_counts.size(), source_ids.size(), "source map has one entry for every authoring identity and no extras")
 	for source_id: String in source_ids:
 		assert_eq(mapped_counts.get(source_id, 0), 1, "authoring identity maps exactly once: %s" % source_id)
+
+func _assert_single_important_choice(graph: Dictionary) -> void:
+	var important_count := 0
+	for node_value: Variant in graph.get("nodes", {}).values():
+		if typeof(node_value) != TYPE_DICTIONARY:
+			continue
+		var node: Dictionary = node_value
+		if String(node.get("type", "")) != "choice" or node.get("autosave", false) != true:
+			continue
+		important_count += 1
+		for item_value: Variant in node.get("items", []):
+			assert_false((item_value as Dictionary).has("autosave"), "important metadata stays on the choice block instead of its items")
+	assert_eq(important_count, 1, "tracked authoring publishes exactly its first mirror choice as important")
 
 func _collect_source_ids(value: Variant, result: Array[String]) -> void:
 	if typeof(value) == TYPE_DICTIONARY:

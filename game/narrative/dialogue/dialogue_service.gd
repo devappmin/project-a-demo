@@ -8,6 +8,7 @@ const MAX_AUTOMATIC_STEPS := DialogueRuntimeContractResource.MAX_AUTOMATIC_STEPS
 signal line_requested(character_key: StringName, expression: StringName, text: String)
 signal choices_requested(items: Array[Dictionary])
 signal command_requested(command: Dictionary)
+signal stable_checkpoint_reached(kind: StringName, checkpoint: Dictionary)
 signal finished
 signal failed(context: Dictionary)
 
@@ -23,6 +24,10 @@ var _available_choices: Array[Dictionary] = []
 var _deferred_failure_reason: StringName = &""
 var _run_generation := 0
 var _dispatch_state_by_generation: Dictionary = {}
+var _dispatch_checkpoint_by_generation: Dictionary = {}
+var _bundle_key: StringName = &""
+var _trigger_key: StringName = &""
+var _checkpoint: Dictionary = {}
 
 func _ready() -> void:
 	if graph_loader == null:
@@ -39,9 +44,11 @@ func _exit_tree() -> void:
 	_restore_previous_mode()
 	_clear_active_state()
 
-func start_dialogue(scene_key: StringName, node_id := &"") -> Error:
+func start_dialogue(scene_key: StringName, node_id := &"", context := {}) -> Error:
 	if _active:
 		return ERR_ALREADY_IN_USE
+	if typeof(context) != TYPE_DICTIONARY:
+		return ERR_INVALID_PARAMETER
 	if graph_loader == null:
 		graph_loader = DialogueGraphLoader.new()
 	var loaded_graph := graph_loader.load_scene(scene_key)
@@ -67,9 +74,69 @@ func start_dialogue(scene_key: StringName, node_id := &"") -> Error:
 	_run_generation += 1
 	current_graph = loaded_graph
 	current_node_id = entry_id
+	_bundle_key = loaded_graph.scene_key
+	var trigger_value: Variant = context.get("trigger_key", "")
+	_trigger_key = StringName(trigger_value) if _is_string_value(trigger_value) else &""
+	_checkpoint.clear()
 	_available_choices.clear()
 	_active = true
-	return _dispatch_until_boundary()
+	var dispatch_generation := _run_generation
+	var error := _dispatch_until_boundary()
+	_dispatch_checkpoint_by_generation.erase(dispatch_generation)
+	return error
+
+func validate_checkpoint(checkpoint: Dictionary) -> Error:
+	if checkpoint.get("active", null) != true:
+		return ERR_INVALID_PARAMETER
+	for field: String in ["bundle_key", "trigger_key", "node_id", "boundary"]:
+		if not checkpoint.has(field) or not _is_string_value(checkpoint[field]):
+			return ERR_INVALID_PARAMETER
+	var bundle_key := StringName(checkpoint["bundle_key"])
+	var node_id := StringName(checkpoint["node_id"])
+	var boundary := String(checkpoint["boundary"])
+	if bundle_key.is_empty() or node_id.is_empty() or boundary not in ["line", "choice"]:
+		return ERR_INVALID_PARAMETER
+	if graph_loader == null:
+		graph_loader = DialogueGraphLoader.new()
+	var graph := graph_loader.load_scene(bundle_key)
+	if graph == null:
+		return ERR_CANT_OPEN
+	var node := graph.get_node(node_id)
+	if node.is_empty():
+		return ERR_INVALID_PARAMETER
+	var node_type := String(node.get("type", ""))
+	if node_type not in ["line", "choice"] or node_type != boundary:
+		return ERR_INVALID_PARAMETER
+	return OK
+
+func resume_checkpoint(checkpoint: Dictionary) -> Error:
+	if _active:
+		return ERR_ALREADY_IN_USE
+	var validation_error := validate_checkpoint(checkpoint)
+	if validation_error != OK:
+		return validation_error
+	var bundle_key := StringName(checkpoint["bundle_key"])
+	var node_id := StringName(checkpoint["node_id"])
+	var loaded_graph := graph_loader.load_scene(bundle_key)
+	if loaded_graph == null:
+		return ERR_CANT_OPEN
+	if refresh_session_state() != OK:
+		return ERR_UNCONFIGURED
+	_previous_mode = GameModeResource.Value.EXPLORATION
+	if not game_session.change_mode(GameModeResource.Value.DIALOGUE):
+		return ERR_UNAVAILABLE
+	_run_generation += 1
+	current_graph = loaded_graph
+	current_node_id = node_id
+	_bundle_key = bundle_key
+	_trigger_key = StringName(checkpoint["trigger_key"])
+	_checkpoint = checkpoint.duplicate(true)
+	_available_choices.clear()
+	_active = true
+	var dispatch_generation := _run_generation
+	var error := _dispatch_until_boundary()
+	_dispatch_checkpoint_by_generation.erase(dispatch_generation)
+	return error
 
 func refresh_session_state() -> Error:
 	if game_session == null:
@@ -90,7 +157,9 @@ func advance() -> void:
 		_runtime_failure(ERR_INVALID_DATA, &"invalid_next")
 		return
 	current_node_id = next_id
+	var dispatch_generation := _run_generation
 	_dispatch_until_boundary()
+	_dispatch_checkpoint_by_generation.erase(dispatch_generation)
 
 func choose(index: int) -> Error:
 	if not _active or current_graph == null:
@@ -100,6 +169,7 @@ func choose(index: int) -> Error:
 		return ERR_UNAVAILABLE
 	if index < 0 or index >= _available_choices.size():
 		return ERR_INVALID_PARAMETER
+	var should_publish_checkpoint: bool = node.get("autosave", false) == true
 	var choice := _available_choices[index].duplicate(true)
 	var state_before := narrative_state.snapshot()
 	var effect_error := _apply_effects(choice.get("effects", []))
@@ -113,11 +183,18 @@ func choose(index: int) -> Error:
 	_available_choices.clear()
 	current_node_id = next_id
 	_deferred_failure_reason = &""
+	var dispatch_generation := _run_generation
 	var dispatch_error := _dispatch_until_boundary(false, state_before)
 	if dispatch_error != OK:
+		_dispatch_checkpoint_by_generation.erase(dispatch_generation)
 		narrative_state.restore(state_before)
 		var failure_reason := _deferred_failure_reason if not _deferred_failure_reason.is_empty() else &"dispatch_failed"
 		return _runtime_failure(dispatch_error, failure_reason)
+	if should_publish_checkpoint:
+		var checkpoint_value: Variant = _dispatch_checkpoint_by_generation.get(dispatch_generation, {})
+		if typeof(checkpoint_value) == TYPE_DICTIONARY and not (checkpoint_value as Dictionary).is_empty():
+			stable_checkpoint_reached.emit(&"important_choice", (checkpoint_value as Dictionary).duplicate(true))
+	_dispatch_checkpoint_by_generation.erase(dispatch_generation)
 	return dispatch_error
 
 func abort_dialogue(reason: StringName) -> void:
@@ -126,15 +203,11 @@ func abort_dialogue(reason: StringName) -> void:
 	_runtime_failure(ERR_SKIP, reason)
 
 func get_checkpoint() -> Dictionary:
-	if not _active or current_graph == null:
-		return {}
-	return {
-		"scene_key": String(current_graph.scene_key),
-		"next_node_id": String(current_node_id),
-	}.duplicate(true)
+	return _checkpoint.duplicate(true)
 
 func _dispatch_until_boundary(publish_failure := true, transaction_state: Dictionary = {}) -> Error:
 	var dispatch_generation := _run_generation
+	_dispatch_checkpoint_by_generation.erase(dispatch_generation)
 	var state_before: Dictionary = transaction_state.duplicate(true) if not transaction_state.is_empty() else narrative_state.snapshot()
 	_dispatch_state_by_generation[dispatch_generation] = state_before.duplicate(true)
 	var automatic_steps := 0
@@ -146,6 +219,7 @@ func _dispatch_until_boundary(publish_failure := true, transaction_state: Dictio
 		match node_type:
 			"line":
 				_available_choices.clear()
+				_publish_stable_boundary(dispatch_generation, &"line")
 				_complete_dispatch_segment(dispatch_generation)
 				line_requested.emit(
 					StringName(node.get("speaker", "")),
@@ -160,10 +234,13 @@ func _dispatch_until_boundary(publish_failure := true, transaction_state: Dictio
 				var public_items: Array[Dictionary] = []
 				for item: Dictionary in _available_choices:
 					public_items.append({"text":String(item.get("text", ""))})
+				_publish_stable_boundary(dispatch_generation, &"choice")
 				_complete_dispatch_segment(dispatch_generation)
 				choices_requested.emit(public_items.duplicate(true))
 				return OK
 			"end":
+				_checkpoint = {"active":false}
+				_dispatch_checkpoint_by_generation[dispatch_generation] = _checkpoint.duplicate(true)
 				_complete_dispatch_segment(dispatch_generation)
 				_finish_dialogue()
 				return OK
@@ -243,7 +320,7 @@ func _next_node_id(node: Dictionary) -> StringName:
 
 func _finish_dialogue() -> void:
 	_restore_previous_mode()
-	_clear_active_state()
+	_clear_active_state(true)
 	finished.emit()
 
 func _runtime_failure(error: Error, reason: StringName) -> Error:
@@ -263,11 +340,15 @@ func _restore_previous_mode() -> void:
 	if _active and game_session != null:
 		game_session.change_mode(_previous_mode)
 
-func _clear_active_state() -> void:
+func _clear_active_state(preserve_checkpoint := false) -> void:
 	_dispatch_state_by_generation.erase(_run_generation)
 	_active = false
 	current_graph = null
 	current_node_id = &""
+	_bundle_key = &""
+	_trigger_key = &""
+	if not preserve_checkpoint:
+		_checkpoint.clear()
 	_available_choices.clear()
 	_deferred_failure_reason = &""
 	_run_generation += 1
@@ -283,3 +364,16 @@ func _rollback_dispatch_segment(generation: int) -> void:
 
 func _emit_failure(context: Dictionary) -> void:
 	failed.emit(context.duplicate(true))
+
+func _publish_stable_boundary(dispatch_generation: int, boundary: StringName) -> void:
+	_checkpoint = {
+		"active":true,
+		"bundle_key":String(_bundle_key),
+		"trigger_key":String(_trigger_key),
+		"node_id":String(current_node_id),
+		"boundary":String(boundary),
+	}
+	_dispatch_checkpoint_by_generation[dispatch_generation] = _checkpoint.duplicate(true)
+
+func _is_string_value(value: Variant) -> bool:
+	return typeof(value) == TYPE_STRING or typeof(value) == TYPE_STRING_NAME

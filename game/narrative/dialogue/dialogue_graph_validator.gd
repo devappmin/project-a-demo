@@ -122,6 +122,8 @@ static func _validate_line(node: Dictionary, node_id: String, nodes: Dictionary,
 	_validate_next(node, node_id, nodes, scene_key, adjacency, issues)
 
 static func _validate_choice(node: Dictionary, node_id: String, nodes: Dictionary, scene_key: String, adjacency: Dictionary, issues: Array[Dictionary]) -> void:
+	if node.has("autosave") and typeof(node["autosave"]) != TYPE_BOOL:
+		_add_issue(issues, "invalid_autosave", scene_key, node_id, "choice autosave must be a Boolean")
 	var items_value: Variant = node.get("items")
 	if typeof(items_value) != TYPE_ARRAY or items_value.is_empty():
 		_add_issue(issues, "invalid_field", scene_key, node_id, "choice items must be a nonempty array")

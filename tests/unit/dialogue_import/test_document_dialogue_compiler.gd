@@ -15,6 +15,7 @@ func run() -> void:
 	var catalog: Variant = catalog_script.from_dictionary(_catalog_data())
 	var characters: Resource = load(CHARACTERS_PATH)
 	_validate_complete_graph(compiler, fixture, catalog, characters)
+	_validate_choice_autosave_metadata(compiler, fixture, catalog, characters)
 	_validate_result_timing(compiler, fixture, catalog, characters)
 	_validate_loops_rejoins_and_later_choices(compiler, fixture, catalog, characters)
 	_validate_comment_invariance(compiler, fixture, catalog, characters)
@@ -57,6 +58,26 @@ func _validate_complete_graph(compiler: Variant, fixture: Variant, catalog: Vari
 	var source_json: String = compiler.stable_json(result["source_map"])
 	assert_true(source_json.contains("notion-block-start-1") and source_json.contains("https://www.notion.so/foundation"), "source map preserves normalized source identity and URL")
 	assert_false(source_json.contains("이 메모는 출력에 영향을 주지 않는다"), "source map excludes comment text")
+
+func _validate_choice_autosave_metadata(compiler: Variant, fixture: Variant, catalog: Variant, characters: Resource) -> void:
+	var ordinary_result: Dictionary = _compile(compiler, fixture.valid_bundle(), catalog, characters)
+	var important_bundle: Dictionary = fixture.valid_bundle()
+	important_bundle["triggers"][0]["events"][1]["flows"][0]["blocks"][2]["autosave"] = true
+	var important_result: Dictionary = _compile(compiler, important_bundle, catalog, characters)
+	assert_true(important_result.get("ok", false), "important choice bundle compiles")
+	if not ordinary_result.get("ok", false) or not important_result.get("ok", false):
+		return
+	var ordinary_choice_id := _node_for_source(ordinary_result["source_map"], "notion-block-choice-1")
+	var important_choice_id := _node_for_source(important_result["source_map"], "notion-block-choice-1")
+	var ordinary_choice: Dictionary = ordinary_result["graphs"]["foundation.inspect"]["nodes"][ordinary_choice_id]
+	var important_choice: Dictionary = important_result["graphs"]["foundation.inspect"]["nodes"][important_choice_id]
+	assert_false(ordinary_choice.has("autosave"), "ordinary choice omits canonical false autosave metadata")
+	assert_eq(important_choice.get("autosave"), true, "important choice compiles exactly autosave true on its node")
+	for item_value: Variant in important_choice.get("items", []):
+		assert_false((item_value as Dictionary).has("autosave"), "autosave never attaches to a visible choice item")
+	assert_eq(compiler.stable_json(ordinary_result["source_map"]), compiler.stable_json(important_result["source_map"]), "autosave metadata does not alter source identities")
+	var important_graph: Dictionary = important_result["graphs"]["foundation.inspect"]
+	assert_eq(important_result["manifest"]["files"]["foundation_inspect.json"], compiler.stable_json(important_graph).sha256_text(), "autosave graph bytes retain a coherent manifest hash")
 
 func _validate_result_timing(compiler: Variant, fixture: Variant, catalog: Variant, characters: Resource) -> void:
 	var bundle: Dictionary = fixture.valid_bundle()

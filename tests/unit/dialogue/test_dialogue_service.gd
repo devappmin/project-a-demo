@@ -8,16 +8,22 @@ const GameSessionResource = preload("res://app/session/game_session.gd")
 
 class GraphLoaderStub extends DialogueGraphLoader:
 	var graph_to_return: DialogueGraph
+	var graphs: Dictionary = {}
 	var failure_to_return: Dictionary = {}
+	var load_count := 0
 
-	func load_scene(_scene_key: StringName) -> DialogueGraph:
+	func load_scene(scene_key: StringName) -> DialogueGraph:
+		load_count += 1
 		last_failure = failure_to_return.duplicate(true)
+		if not graphs.is_empty():
+			return graphs.get(String(scene_key)) as DialogueGraph
 		return graph_to_return
 
 var _lines: Array[Dictionary] = []
 var _choices: Array[Array] = []
 var _commands: Array[Dictionary] = []
 var _failures: Array[Dictionary] = []
+var _stable_checkpoints: Array[Dictionary] = []
 var _finished_count := 0
 var _requested_choice_indices: Array[int] = []
 
@@ -37,6 +43,8 @@ func run() -> void:
 	_test_automatic_dispatch_and_guard(service_script)
 	_test_start_and_advance_automatic_transactions(service_script)
 	_test_choice_filtering_index_stability_and_checkpoint(service_script)
+	_test_checkpoint_provenance_validation_and_resume(service_script)
+	_test_important_choice_checkpoint_publication(service_script)
 	_test_zero_visible_choices_fail_safely(service_script)
 	_test_runtime_failure_rolls_back_choice_effects(service_script)
 	_test_downstream_choice_failure_rolls_back_before_publication(service_script)
@@ -225,6 +233,7 @@ func _test_choice_filtering_index_stability_and_checkpoint(service_script: Varia
 		assert_eq(_choices[-1].map(func(item: Dictionary) -> String: return String(item.get("text", ""))), ["first visible", "second visible"], "filtered choices preserve visible order")
 	var before_invalid: Dictionary = session.narrative_state.snapshot()
 	var checkpoint_before: Dictionary = service.get_checkpoint()
+	assert_eq(checkpoint_before, {"active":true, "bundle_key":"choices", "trigger_key":"", "node_id":"choice", "boundary":"choice"}, "choice boundary publishes its exact active checkpoint")
 	assert_eq(service.choose(-1), ERR_INVALID_PARAMETER, "negative filtered choice index is rejected")
 	assert_eq(service.choose(2), ERR_INVALID_PARAMETER, "past-end filtered choice index is rejected")
 	assert_eq(session.narrative_state.snapshot(), before_invalid, "invalid choice cannot mutate narrative state")
@@ -236,17 +245,114 @@ func _test_choice_filtering_index_stability_and_checkpoint(service_script: Varia
 	assert_false(session.narrative_state.get_flag(&"hidden_chosen"), "filtered index never selects hidden item")
 	assert_false(session.narrative_state.get_flag(&"second_chosen"), "filtered index remains stable")
 	var checkpoint: Dictionary = service.get_checkpoint()
-	assert_eq(checkpoint, {"scene_key":"choices", "next_node_id":"after"}, "checkpoint identifies active scene and stable node")
-	checkpoint["next_node_id"] = "mutated"
-	assert_eq(service.get_checkpoint().get("next_node_id", ""), "after", "checkpoint callers cannot mutate service state")
+	assert_eq(checkpoint, {"active":true, "bundle_key":"choices", "trigger_key":"", "node_id":"after", "boundary":"line"}, "checkpoint identifies exact graph provenance and stable boundary")
+	checkpoint["node_id"] = "mutated"
+	assert_eq(service.get_checkpoint().get("node_id", ""), "after", "checkpoint callers cannot mutate service state")
+	assert_eq(_stable_checkpoints.size(), 0, "ordinary choices do not emit stable autosave checkpoints")
 	service.abort_dialogue(&"test_cleanup")
+	service.free()
+	session.free()
+
+func _test_checkpoint_provenance_validation_and_resume(service_script: Variant) -> void:
+	_reset_captures()
+	var session := _session_in_mode(GameModeResource.Value.EXPLORATION)
+	var graph := _graph("resume.graph", "line", {
+		"line":{"type":"line", "speaker":"retti", "expression":"neutral", "text":"saved boundary", "next":"end"},
+		"effect":{"type":"effect", "effects":[], "next":"line"},
+		"choice":{"type":"choice", "items":[{"text":"continue", "conditions":[], "effects":[], "next":"end"}]},
+		"end":{"type":"end"},
+	})
+	var loader := GraphLoaderStub.new()
+	loader.graphs["resume.graph"] = graph
+	var service: Variant = _configured_service(service_script, loader, session)
+	assert_eq(_method_argument_count(service_script, "start_dialogue"), 3, "start_dialogue accepts provenance context")
+	assert_true(service.has_method("validate_checkpoint"), "dialogue service exposes checkpoint validation")
+	assert_true(service.has_method("resume_checkpoint"), "dialogue service exposes direct checkpoint resume")
+	if _method_argument_count(service_script, "start_dialogue") != 3 or not service.has_method("validate_checkpoint") or not service.has_method("resume_checkpoint"):
+		service.free()
+		session.free()
+		return
+	var context := {"bundle_key":"resume.graph", "trigger_key":"mirror.inspect"}
+	assert_eq(service.start_dialogue(&"resume.graph", &"line", context), OK, "dialogue starts with document provenance")
+	var checkpoint: Dictionary = service.get_checkpoint()
+	assert_eq(checkpoint, {"active":true, "bundle_key":"resume.graph", "trigger_key":"mirror.inspect", "node_id":"line", "boundary":"line"}, "active checkpoint contains exact bundle trigger node and boundary")
+	checkpoint["nested"] = {"value":"mutated"}
+	var second_copy: Dictionary = service.get_checkpoint()
+	assert_false(second_copy.has("nested"), "checkpoint callers receive a deep independent copy")
+	assert_eq(service.validate_checkpoint(second_copy), OK, "saved stable line checkpoint validates")
+	for invalid_checkpoint: Dictionary in [
+		{"active":true, "bundle_key":"missing.graph", "trigger_key":"mirror.inspect", "node_id":"line", "boundary":"line"},
+		{"active":true, "bundle_key":"resume.graph", "trigger_key":"mirror.inspect", "node_id":"missing", "boundary":"line"},
+		{"active":true, "bundle_key":"resume.graph", "trigger_key":"mirror.inspect", "node_id":"effect", "boundary":"line"},
+		{"active":true, "bundle_key":"resume.graph", "trigger_key":"mirror.inspect", "node_id":"end", "boundary":"line"},
+		{"active":true, "bundle_key":"resume.graph", "trigger_key":"mirror.inspect", "node_id":"choice", "boundary":"line"},
+	]:
+		assert_true(service.validate_checkpoint(invalid_checkpoint) != OK, "checkpoint validation rejects missing or unstable graph boundaries")
+	service.abort_dialogue(&"save_reload")
+	assert_true(session.change_mode(GameModeResource.Value.TRANSITION), "load flow may place the session in transition")
+	var line_count_before := _lines.size()
+	assert_eq(service.resume_checkpoint(second_copy), OK, "checkpoint resumes directly at its saved boundary")
+	assert_eq(service.current_node_id, &"line", "resume publishes the exact saved node")
+	assert_eq(_lines.size(), line_count_before + 1, "resume republishes the saved line boundary")
+	service.advance()
+	assert_eq(session.current_mode, GameModeResource.Value.EXPLORATION, "resumed dialogue returns to exploration after completion")
+	assert_eq(service.get_checkpoint(), {"active":false}, "successful end publishes the inactive checkpoint")
+	service.free()
+	session.free()
+
+func _test_important_choice_checkpoint_publication(service_script: Variant) -> void:
+	_reset_captures()
+	var nodes := {
+		"choice":{"type":"choice", "autosave":true, "items":[{
+			"text":"important", "conditions":[],
+			"effects":[{"kind":"flag_set", "key":"choice_applied", "value":true}],
+			"next":"automatic",
+		}]},
+		"automatic":{"type":"effect", "effects":[{"kind":"flag_set", "key":"automatic_applied", "value":true}], "next":"line"},
+		"line":{"type":"line", "speaker":"retti", "expression":"neutral", "text":"stable", "next":"end"},
+		"end":{"type":"end"},
+	}
+	var session := _session_in_mode(GameModeResource.Value.EXPLORATION)
+	var service: Variant = _service_for_graph(service_script, _graph("important", "choice", nodes), session)
+	assert_true(service.has_signal("stable_checkpoint_reached"), "dialogue service exposes the stable checkpoint signal")
+	var observed_after_success := {"value":false}
+	if service.has_signal("stable_checkpoint_reached"):
+		service.stable_checkpoint_reached.connect(func(_kind: StringName, _checkpoint: Dictionary) -> void:
+			observed_after_success["value"] = session.narrative_state.get_flag(&"choice_applied") and session.narrative_state.get_flag(&"automatic_applied") and not _lines.is_empty()
+		)
+	assert_eq(service.start_dialogue(&"important"), OK, "important choice graph starts")
+	assert_eq(service.choose(0), OK, "important choice reaches its stable line")
+	assert_eq(_stable_checkpoints.size(), 1, "important choice emits exactly one stable checkpoint")
+	if not _stable_checkpoints.is_empty():
+		assert_eq(_stable_checkpoints[0], {"kind":&"important_choice", "checkpoint":{"active":true, "bundle_key":"important", "trigger_key":"", "node_id":"line", "boundary":"line"}}, "important choice emits its exact stable line checkpoint")
+	assert_true(observed_after_success["value"], "important checkpoint emits only after effects automatic dispatch and boundary publication")
+	var public_checkpoint: Dictionary = service.get_checkpoint()
+	if not _stable_checkpoints.is_empty():
+		_stable_checkpoints[0]["checkpoint"]["node_id"] = "listener mutation"
+	assert_eq(service.get_checkpoint(), public_checkpoint, "stable checkpoint listeners cannot mutate service state")
+	service.abort_dialogue(&"test_cleanup")
+	service.free()
+	session.free()
+
+	_reset_captures()
+	var end_nodes := {
+		"choice":{"type":"choice", "autosave":true, "items":[{"text":"finish", "conditions":[], "effects":[{"kind":"flag_set", "key":"end_applied", "value":true}], "next":"end"}]},
+		"end":{"type":"end"},
+	}
+	session = _session_in_mode(GameModeResource.Value.EXPLORATION)
+	service = _service_for_graph(service_script, _graph("important_end", "choice", end_nodes), session)
+	assert_eq(service.start_dialogue(&"important_end"), OK, "important end graph starts")
+	assert_eq(service.choose(0), OK, "important choice may finish the dialogue")
+	assert_true(session.narrative_state.get_flag(&"end_applied"), "important end applies choice effects")
+	assert_eq(_stable_checkpoints, [{"kind":&"important_choice", "checkpoint":{"active":false}}], "important choice followed by end emits one inactive checkpoint")
+	assert_eq(session.current_mode, GameModeResource.Value.EXPLORATION, "important end restores exploration")
 	service.free()
 	session.free()
 
 func _test_runtime_failure_rolls_back_choice_effects(service_script: Variant) -> void:
 	_reset_captures()
 	var nodes := {
-		"choice":{"type":"choice", "items":[{
+		"choice":{"type":"choice", "autosave":true, "items":[{
 			"text":"broken", "conditions":[],
 			"effects":[
 				{"kind":"flag_set", "key":"must_rollback", "value":true},
@@ -263,13 +369,14 @@ func _test_runtime_failure_rolls_back_choice_effects(service_script: Variant) ->
 	assert_false(session.narrative_state.get_flag(&"must_rollback"), "failed choice rolls back earlier effects")
 	assert_eq(session.current_mode, GameModeResource.Value.MENU, "effect failure restores exact prior mode")
 	assert_eq(service.current_graph, null, "runtime failure clears the graph")
+	assert_eq(_stable_checkpoints.size(), 0, "effect failure emits no autosave checkpoint")
 	service.free()
 	session.free()
 
 func _test_zero_visible_choices_fail_safely(service_script: Variant) -> void:
 	_reset_captures()
 	var nodes := {
-		"choice":{"type":"choice", "items":[{
+		"choice":{"type":"choice", "autosave":true, "items":[{
 			"text":"hidden", "conditions":[{"kind":"flag", "key":"show_choice", "operator":"eq", "value":true}],
 			"effects":[{"kind":"flag_set", "key":"hidden_effect", "value":true}], "next":"end",
 		}]},
@@ -288,13 +395,14 @@ func _test_zero_visible_choices_fail_safely(service_script: Variant) -> void:
 		assert_eq(_failures[-1].get("reason"), &"no_visible_choices", "empty filtered choice has stable failure context")
 	assert_eq(_finished_count, 0, "empty filtered choice is not reported as finished")
 	assert_eq(service.get_checkpoint(), {}, "empty filtered choice clears active dialogue")
+	assert_eq(_stable_checkpoints.size(), 0, "important choice with no visible items emits no autosave checkpoint")
 	service.free()
 	session.free()
 
 func _test_downstream_choice_failure_rolls_back_before_publication(service_script: Variant) -> void:
 	_reset_captures()
 	var nodes := {
-		"choice":{"type":"choice", "items":[{
+		"choice":{"type":"choice", "autosave":true, "items":[{
 			"text":"continue", "conditions":[],
 			"effects":[{"kind":"flag_set", "key":"choice_transient", "value":true}],
 			"next":"automatic_effect",
@@ -310,7 +418,9 @@ func _test_downstream_choice_failure_rolls_back_before_publication(service_scrip
 	service.graph_loader = loader
 	service.game_session = session
 	service.narrative_state = session.narrative_state
-	var observation := {"count":0, "saw_rollback":false, "restart_error":FAILED}
+	var observation := {"count":0, "saw_rollback":false, "restart_error":FAILED, "stable_count":0}
+	if service.has_signal("stable_checkpoint_reached"):
+		service.stable_checkpoint_reached.connect(func(_kind: StringName, _checkpoint: Dictionary) -> void: observation["stable_count"] += 1)
 	service.failed.connect(func(context: Dictionary) -> void:
 		if context.get("reason") != &"invalid_next":
 			return
@@ -331,6 +441,7 @@ func _test_downstream_choice_failure_rolls_back_before_publication(service_scrip
 	assert_true(session.narrative_state.get_flag(&"base_preserved"), "pre-choice state survives rollback")
 	assert_false(session.narrative_state.get_flag(&"choice_transient"), "choice effect is rolled back")
 	assert_false(session.narrative_state.get_flag(&"auto_transient"), "downstream automatic effect is rolled back")
+	assert_eq(observation["stable_count"], 0, "downstream dispatch failure emits no autosave checkpoint")
 	assert_eq(service.current_node_id, &"line", "outer choose cleanup cannot erase reentrant dialogue")
 	assert_eq(session.current_mode, GameModeResource.Value.DIALOGUE, "reentrant dialogue retains dialogue mode")
 	service.abort_dialogue(&"test_cleanup")
@@ -551,6 +662,8 @@ func _configured_service(service_script: Variant, loader: DialogueGraphLoader, s
 	service.command_requested.connect(_capture_command_and_mutate)
 	service.failed.connect(_capture_failure)
 	service.finished.connect(func() -> void: _finished_count += 1)
+	if service.has_signal("stable_checkpoint_reached"):
+		service.stable_checkpoint_reached.connect(_capture_stable_checkpoint)
 	return service
 
 func _service_for_graph(service_script: Variant, graph: DialogueGraph, session: Node) -> Variant:
@@ -591,13 +704,23 @@ func _capture_failure(context: Dictionary) -> void:
 	_failures.append(context.duplicate(true))
 	context["reason"] = &"listener_mutation"
 
+func _capture_stable_checkpoint(kind: StringName, checkpoint: Dictionary) -> void:
+	_stable_checkpoints.append({"kind":kind, "checkpoint":checkpoint.duplicate(true)})
+
 func _reset_captures() -> void:
 	_lines.clear()
 	_choices.clear()
 	_commands.clear()
 	_failures.clear()
+	_stable_checkpoints.clear()
 	_finished_count = 0
 	_requested_choice_indices.clear()
+
+func _method_argument_count(script: Script, method_name: String) -> int:
+	for method: Dictionary in script.get_script_method_list():
+		if String(method.get("name", "")) == method_name:
+			return (method.get("args", []) as Array).size()
+	return -1
 
 func _send_action(action: StringName, pressed: bool) -> void:
 	var event := InputEventAction.new()

@@ -54,6 +54,7 @@
 			"type": "line"
 		},
 		"default.start.choice_93440f2bd8ca": {
+			"autosave": true,
 			"items": [
 				{
 					"conditions": [],

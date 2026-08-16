@@ -21,6 +21,7 @@ func run() -> void:
 	assert_eq(schema.validate_bundle(json_bundle, catalog, characters), [], "JSON numeric schema version 1 validates")
 	_test_identity(identity)
 	_test_stable_identity_through_comments_and_renames(identity, schema, fixture, catalog, characters)
+	_test_choice_autosave_contract(schema, fixture, catalog, characters)
 	_test_contract_failures(schema, fixture, catalog, characters)
 	_test_fail_closed_shapes(schema, fixture, catalog, characters)
 	_test_field_type_contract(schema, fixture, catalog, characters)
@@ -51,6 +52,20 @@ func _test_stable_identity_through_comments_and_renames(identity: Script, schema
 	assert_eq(identity.stable_key("event", String(event["source_id"]), String(event["event_key"])), identity.stable_key("event", String(before["triggers"][0]["events"][1]["source_id"]), String(before["triggers"][0]["events"][1]["event_key"])), "retained event key survives Korean rename")
 	event.erase("event_key")
 	assert_eq(identity.stable_key("event", String(event["source_id"])), identity.stable_key("event", String(before["triggers"][0]["events"][1]["source_id"])), "source-derived event key survives title rename")
+
+func _test_choice_autosave_contract(schema: Script, fixture: Script, catalog: NarrativeCatalog, characters: Resource) -> void:
+	var absent: Dictionary = fixture.valid_bundle()
+	assert_eq(schema.validate_bundle(absent, catalog, characters), [], "choice autosave is optional and absent means false")
+	var enabled: Dictionary = fixture.valid_bundle()
+	enabled["triggers"][0]["events"][1]["flows"][0]["blocks"][2]["autosave"] = true
+	assert_eq(schema.validate_bundle(enabled, catalog, characters), [], "choice autosave accepts a Boolean")
+	for invalid_value: Variant in ["true", 1]:
+		var invalid: Dictionary = fixture.valid_bundle()
+		invalid["triggers"][0]["events"][1]["flows"][0]["blocks"][2]["autosave"] = invalid_value
+		assert_true(_has_issue(schema.validate_bundle(invalid, catalog, characters), "invalid_autosave", "error"), "choice autosave rejects non-Boolean values")
+	var unrelated: Dictionary = fixture.valid_bundle()
+	unrelated["triggers"][0]["events"][1]["flows"][0]["blocks"][0]["autosave"] = true
+	assert_true(_has_issue(schema.validate_bundle(unrelated, catalog, characters), "invalid_line_block", "error"), "line blocks reject choice-only autosave")
 
 func _test_contract_failures(schema: Script, fixture: Script, catalog: NarrativeCatalog, characters: Resource) -> void:
 	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle.erase("schema_version"), "unsupported_schema_version")

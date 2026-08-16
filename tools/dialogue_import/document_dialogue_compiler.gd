@@ -201,7 +201,10 @@ static func _compile_bundle(bundle: Dictionary, catalog: NarrativeCatalog) -> Di
 						target = _route_effects(nodes, node_contexts, route_id + ".flow_results", _normalize_effects(flow.get("effects", []), catalog), target, issues, route_context)
 						items.append({"text":String(item.get("text", "")), "conditions":_normalize_conditions(item.get("conditions", []), catalog), "effects":_normalize_effects(item.get("effects", []), catalog), "next":target})
 						item_index += 1
-					nodes[node_id] = {"type":"choice", "items":items}
+					var choice_node := {"type":"choice", "items":items}
+					if block.get("autosave", false):
+						choice_node["autosave"] = true
+					nodes[node_id] = choice_node
 				"jump":
 					var target := _target_entry(block, event_key, flow_entries, event_entries)
 					var route_context: Dictionary = node_contexts.get(node_id, _context(bundle))

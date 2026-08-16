@@ -31,6 +31,9 @@ func _handle_document_dialogue(payload: Dictionary) -> Error:
 	var resolved: Dictionary = event_resolver.resolve(bundle_key, trigger_key, dialogue_service.narrative_state)
 	if not resolved.get("ok", false):
 		return resolved.get("error", ERR_INVALID_DATA)
-	return dialogue_service.start_dialogue(resolved["scene_key"], resolved["node_id"])
+	return dialogue_service.start_dialogue(resolved["scene_key"], resolved["node_id"], {
+		"bundle_key":String(bundle_key),
+		"trigger_key":String(trigger_key),
+	})
 func _is_string_value(value: Variant) -> bool:
 	return typeof(value) == TYPE_STRING or typeof(value) == TYPE_STRING_NAME

@@ -9,6 +9,13 @@ class UnhandledInputProbe extends Node:
 		if event.is_action_pressed(&"interact", false):
 			interact_press_count += 1
 
+class CountingEventResolver extends DialogueEventResolver:
+	var resolve_count := 0
+
+	func resolve(bundle_key: StringName, trigger_key: StringName, state: NarrativeState) -> Dictionary:
+		resolve_count += 1
+		return super.resolve(bundle_key, trigger_key, state)
+
 func run() -> void:
 	var previous_mode: int = GameSession.current_mode
 	var previous_state: NarrativeState = GameSession.narrative_state
@@ -197,13 +204,24 @@ func _test_document_event_resolution(adapter: Node, dialogue: DialogueService, v
 	var loader := DialogueGraphLoader.new()
 	loader.base_directory = output_directory
 	dialogue.graph_loader = loader
-	var resolver: RefCounted = resolver_script.new()
+	var resolver := CountingEventResolver.new()
 	resolver.event_index = index_script.from_dictionary(_runtime_event_index(true))
 	adapter.set("event_resolver", resolver)
 	GameSession.narrative_state.set_flag(&"mirror_seen", false)
 	var fallback_error: Variant = adapter.call("handle_action", &"inspect", {"dialogue_bundle_key":&"foundation.inspect", "dialogue_trigger_key":&"mirror.inspect"})
 	assert_eq(fallback_error, OK, "document payload starts its fallback event")
 	assert_eq(dialogue.current_node_id, &"default.start.line", "false condition selects the ordered fallback entry")
+	var fallback_checkpoint: Dictionary = dialogue.get_checkpoint()
+	assert_eq(fallback_checkpoint, {"active":true, "bundle_key":"foundation.inspect", "trigger_key":"mirror.inspect", "node_id":"default.start.line", "boundary":"line"}, "adapter passes exact bundle and trigger provenance into the checkpoint")
+	assert_eq(resolver.resolve_count, 1, "initial document action resolves its event once")
+	assert_true(dialogue.has_method("resume_checkpoint"), "dialogue exposes direct checkpoint resume")
+	if dialogue.has_method("resume_checkpoint"):
+		dialogue.abort_dialogue(&"save_reload")
+		GameSession.narrative_state.set_flag(&"mirror_seen", true)
+		assert_true(GameSession.change_mode(GameModeResource.Value.TRANSITION), "load sequence enters transition before dialogue resume")
+		assert_eq(dialogue.call("resume_checkpoint", fallback_checkpoint), OK, "saved document dialogue resumes directly")
+		assert_eq(resolver.resolve_count, 1, "direct resume never reevaluates document event conditions")
+		assert_eq(dialogue.current_node_id, &"default.start.line", "resume starts at the exact saved fallback boundary despite changed conditions")
 	dialogue.advance()
 	await get_tree().process_frame
 	assert_eq(_current_node_type(dialogue), "choice", "fallback reaches its first choice")

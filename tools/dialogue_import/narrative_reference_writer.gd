@@ -22,6 +22,9 @@ static func render(catalog: NarrativeCatalog, characters: Resource) -> String:
 			for record: Dictionary in records:
 				_append_record(lines, record, String(category["kind"]))
 		lines.append("")
+	lines.append("## 중요 선택 자동 저장")
+	lines.append("선택 직후의 결과와 자동 진행이 안정된 대사·선택지 경계까지 성공한 뒤 저장해야 하는 선택에는 선택지 블록 인용문에 `자동 저장: 중요 선택`이라고 씁니다. 이 인용문이 없으면 자동 저장하지 않습니다. 등록되지 않은 다른 한국어 값은 가져오기 오류입니다.")
+	lines.append("")
 	lines.append("## 등장인물과 표정")
 	_append_characters(lines, characters)
 	return "\n".join(lines) + "\n"

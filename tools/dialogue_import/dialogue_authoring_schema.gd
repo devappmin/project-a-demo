@@ -163,7 +163,9 @@ static func _validate_block(block: Dictionary, block_index: int, block_count: in
 			if block_index == block_count - 1:
 				_add_issue(issues, "error", "unterminated_path", "command must fall through to another block", context)
 		"choice":
-			_validate_allowed_fields(block, ["type", "source_id", "source_url", "block_key", "items", "comments"], "invalid_choice_block", "choice block", context, issues)
+			_validate_allowed_fields(block, ["type", "source_id", "source_url", "block_key", "items", "autosave", "comments"], "invalid_choice_block", "choice block", context, issues)
+			if block.has("autosave") and typeof(block["autosave"]) != TYPE_BOOL:
+				_add_issue(issues, "error", "invalid_autosave", "choice autosave must be a Boolean", context)
 			_validate_choice(block, flow_keys, event_keys, catalog, context, issues)
 		"jump":
 			_validate_allowed_fields(block, ["type", "source_id", "source_url", "block_key", "target_kind", "target_key", "comments"], "invalid_jump_block", "jump block", context, issues)
