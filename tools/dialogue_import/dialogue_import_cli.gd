@@ -44,6 +44,7 @@ static func run_import(input_dir: String, output_dir: String, dry_run: bool, all
 	var bundles: Array[Dictionary] = loaded["bundles"]
 	var compiled := Compiler.compile_bundles(bundles)
 	compiled["counts"] = _count_bundles(bundles)
+	compiled["preview"] = _build_preview(bundles, compiled, output_dir)
 	compiled["error"] = OK if compiled.get("ok", false) else ERR_INVALID_DATA
 	compiled["code"] = "validated" if compiled.get("ok", false) else "compilation_failed"
 	compiled["message"] = "대화 문서 검증이 완료되었습니다." if compiled.get("ok", false) else "대화 문서 검증에 실패했습니다. 오류를 수정한 뒤 다시 시도하세요."
@@ -92,6 +93,22 @@ static func format_result_lines(result: Dictionary, dry_run: bool) -> Dictionary
 	var manifest_value: Variant = result.get("manifest", {})
 	if typeof(manifest_value) == TYPE_DICTIONARY and not (manifest_value as Dictionary).is_empty():
 		stdout.append("manifest SHA-256: %s" % Compiler.stable_json(manifest_value).sha256_text())
+	var preview_value: Variant = result.get("preview", {})
+	if typeof(preview_value) == TYPE_DICTIONARY:
+		for mapping_value: Variant in (preview_value as Dictionary).get("mappings", []):
+			if typeof(mapping_value) != TYPE_DICTIONARY:
+				continue
+			var mapping: Dictionary = mapping_value
+			stdout.append("연결 · %s → %s (%s · %s; 범위: %s)" % [mapping.get("source_text", ""), mapping.get("key", ""), mapping.get("category", ""), mapping.get("role", ""), mapping.get("scope", "")])
+		for change_value: Variant in (preview_value as Dictionary).get("changes", []):
+			if typeof(change_value) != TYPE_DICTIONARY:
+				continue
+			var change: Dictionary = change_value
+			var change_line := "변경 · %s · %s (`%s`) — %s" % [change.get("kind", ""), change.get("name", ""), change.get("key", ""), change.get("status", "")]
+			var scope := String(change.get("scope", ""))
+			if not scope.is_empty():
+				change_line += " (범위: %s)" % scope
+			stdout.append(change_line)
 	return {"stdout":stdout, "stderr":stderr}
 
 static func exit_code_for(result: Dictionary) -> int:
@@ -198,6 +215,144 @@ static func _count_bundles(bundles: Array[Dictionary]) -> Dictionary:
 						elif String(block.get("type", "")) == "choice" and typeof(block.get("items")) == TYPE_ARRAY:
 							counts["choices"] += (block.get("items") as Array).size()
 	return counts
+
+static func _build_preview(bundles: Array[Dictionary], compiled: Dictionary, output_dir: String) -> Dictionary:
+	var mappings: Array[Dictionary] = []
+	var changes: Array[Dictionary] = []
+	var old_events := _read_json_dictionary(output_dir.path_join("events.json"))
+	var ordered_bundles: Array[Dictionary] = bundles.duplicate(true)
+	ordered_bundles.sort_custom(func(left: Dictionary, right: Dictionary) -> bool: return String(left.get("bundle_key", "")) < String(right.get("bundle_key", "")))
+	for bundle: Dictionary in ordered_bundles:
+		var bundle_key := String(bundle.get("bundle_key", ""))
+		var bundle_name := String(bundle.get("title", bundle_key))
+		var graph: Dictionary = compiled.get("graphs", {}).get(bundle_key, {})
+		var old_graph := _read_json_dictionary(output_dir.path_join(_bundle_filename(bundle_key)))
+		changes.append(_change_record("묶음", bundle_name, bundle_key, _change_status(old_graph, graph), "", "0|%s" % bundle_key))
+		for trigger_value: Variant in bundle.get("triggers", []):
+			if typeof(trigger_value) != TYPE_DICTIONARY:
+				continue
+			var trigger: Dictionary = trigger_value
+			var trigger_key := String(trigger.get("trigger_key", ""))
+			var trigger_name := String(trigger.get("name", trigger_key))
+			for event_value: Variant in trigger.get("events", []):
+				if typeof(event_value) != TYPE_DICTIONARY:
+					continue
+				var event: Dictionary = event_value
+				var event_key := String(event.get("event_key", ""))
+				var event_name := String(event.get("name", event_key))
+				var event_scope := " / ".join(PackedStringArray([bundle_name, trigger_name]))
+				var event_signature := {"candidate":_event_candidate(compiled.get("events", {}), bundle_key, trigger_key, event_key), "nodes":_node_subset(graph, event_key + ".")}
+				var old_event_signature := {"candidate":_event_candidate(old_events, bundle_key, trigger_key, event_key), "nodes":_node_subset(old_graph, event_key + ".")}
+				changes.append(_change_record("이벤트", event_name, event_key, _change_status(old_event_signature if not old_graph.is_empty() else {}, event_signature), event_scope, "1|%s|%s|%s" % [bundle_key, trigger_key, event_key]))
+				var base_scope := " / ".join(PackedStringArray([bundle_name, trigger_name, event_name]))
+				_append_mapping_records(mappings, event.get("conditions", []), "조건", base_scope)
+				_append_mapping_records(mappings, event.get("effects", []), "이벤트 결과", base_scope)
+				for flow_value: Variant in event.get("flows", []):
+					if typeof(flow_value) != TYPE_DICTIONARY:
+						continue
+					var flow: Dictionary = flow_value
+					var flow_key := String(flow.get("flow_key", ""))
+					var flow_name := String(flow.get("name", flow_key))
+					var flow_scope := base_scope
+					var flow_prefix := "%s.%s." % [event_key, flow_key]
+					changes.append(_change_record("흐름", flow_name, flow_key, _change_status(_node_subset(old_graph, flow_prefix), _node_subset(graph, flow_prefix)), flow_scope, "2|%s|%s|%s|%s" % [bundle_key, trigger_key, event_key, flow_key]))
+					var mapping_scope := "%s / %s" % [base_scope, flow_name]
+					_append_mapping_records(mappings, flow.get("effects", []), "흐름 결과", mapping_scope)
+					for block_value: Variant in flow.get("blocks", []):
+						if typeof(block_value) != TYPE_DICTIONARY or String((block_value as Dictionary).get("type", "")) != "choice":
+							continue
+						for item_value: Variant in (block_value as Dictionary).get("items", []):
+							if typeof(item_value) != TYPE_DICTIONARY:
+								continue
+							var item: Dictionary = item_value
+							var choice_scope := "%s / 선택지 · %s" % [mapping_scope, String(item.get("text", ""))]
+							_append_mapping_records(mappings, item.get("conditions", []), "선택지 조건", choice_scope)
+							_append_mapping_records(mappings, item.get("effects", []), "선택지 결과", choice_scope)
+	mappings.sort_custom(func(left: Dictionary, right: Dictionary) -> bool: return String(left.get("sort_key", "")) < String(right.get("sort_key", "")))
+	changes.sort_custom(func(left: Dictionary, right: Dictionary) -> bool: return String(left.get("sort_key", "")) < String(right.get("sort_key", "")))
+	for mapping: Dictionary in mappings:
+		mapping.erase("sort_key")
+	for change: Dictionary in changes:
+		change.erase("sort_key")
+	return {"mappings":mappings, "changes":changes}
+
+static func _append_mapping_records(result: Array[Dictionary], records_value: Variant, role: String, scope: String) -> void:
+	if typeof(records_value) != TYPE_ARRAY:
+		return
+	for record_value: Variant in records_value:
+		if typeof(record_value) != TYPE_DICTIONARY:
+			continue
+		var record: Dictionary = record_value
+		var source_text := String(record.get("source_text", "")).strip_edges()
+		var key := String(record.get("key", "")).strip_edges()
+		if source_text.is_empty() or key.is_empty():
+			continue
+		result.append({"source_text":source_text, "key":key, "category":_mapping_category(String(record.get("kind", ""))), "role":role, "scope":scope, "sort_key":"%s|%s|%s|%s" % [scope, role, source_text, key]})
+
+static func _mapping_category(kind: String) -> String:
+	if kind.begins_with("flag"):
+		return "사건 상태"
+	if kind.begins_with("stat"):
+		return "수치 상태"
+	if kind.begins_with("inventory"):
+		return "소지품"
+	if kind.begins_with("quest"):
+		return "퀘스트"
+	if kind.begins_with("collectible"):
+		return "수집품"
+	return "서사 상태"
+
+static func _change_record(kind: String, name: String, key: String, status: String, scope: String, sort_key: String) -> Dictionary:
+	return {"kind":kind, "name":name, "key":key, "status":status, "scope":scope, "sort_key":sort_key}
+
+static func _change_status(previous: Dictionary, current: Dictionary) -> String:
+	if previous.is_empty():
+		return "추가"
+	return "변경 없음" if Compiler.stable_json(_canonical_compare(previous)) == Compiler.stable_json(_canonical_compare(current)) else "변경"
+
+static func _canonical_compare(value: Variant) -> Variant:
+	if typeof(value) == TYPE_FLOAT and float(value) == floor(float(value)):
+		return int(value)
+	if typeof(value) == TYPE_DICTIONARY:
+		var dictionary: Dictionary = {}
+		for key: Variant in (value as Dictionary).keys():
+			dictionary[key] = _canonical_compare((value as Dictionary)[key])
+		return dictionary
+	if typeof(value) == TYPE_ARRAY:
+		var array: Array = []
+		for child: Variant in value:
+			array.append(_canonical_compare(child))
+		return array
+	return value
+
+static func _read_json_dictionary(path: String) -> Dictionary:
+	if not FileAccess.file_exists(path):
+		return {}
+	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
+	return parsed if typeof(parsed) == TYPE_DICTIONARY else {}
+
+static func _bundle_filename(bundle_key: String) -> String:
+	return bundle_key.replace(".", "_") + ".json"
+
+static func _event_candidate(events: Dictionary, bundle_key: String, trigger_key: String, event_key: String) -> Dictionary:
+	var candidates_value: Variant = events.get("bundles", {}).get(bundle_key, {}).get("triggers", {}).get(trigger_key, [])
+	if typeof(candidates_value) != TYPE_ARRAY:
+		return {}
+	for candidate_value: Variant in candidates_value:
+		if typeof(candidate_value) == TYPE_DICTIONARY and String((candidate_value as Dictionary).get("event_key", "")) == event_key:
+			return (candidate_value as Dictionary).duplicate(true)
+	return {}
+
+static func _node_subset(graph: Dictionary, prefix: String) -> Dictionary:
+	var subset: Dictionary = {}
+	var nodes_value: Variant = graph.get("nodes", {})
+	if typeof(nodes_value) != TYPE_DICTIONARY:
+		return subset
+	for node_id_value: Variant in (nodes_value as Dictionary).keys():
+		var node_id := String(node_id_value)
+		if node_id.begins_with(prefix):
+			subset[node_id] = (nodes_value as Dictionary)[node_id_value]
+	return subset
 
 static func _has_warnings(issues_value: Variant) -> bool:
 	if typeof(issues_value) != TYPE_ARRAY:
