@@ -38,7 +38,7 @@ collision_mask = 0
 script = ExtResource("2_target")
 prompt = "방으로 들어가기 [E]"
 action_kind = &"door"
-payload = {"map_id": &"foundation_room", "spawn_id": &"from_hall"}
+payload = {"map_id": &"foundation_room", "object_id": &"to_room", "spawn_id": &"from_hall"}
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="VisualSort/RoomDoor"]
 shape = SubResource("RectangleShape_door")

@@ -7,4 +7,4 @@ script = ExtResource("1_definition")
 map_id = &"foundation_hall"
 scene_path = "res://content/maps/foundation_hall.tscn"
 default_spawn = &"start"
-display_name = "Foundation Hall"
+display_name = "기초 홀"

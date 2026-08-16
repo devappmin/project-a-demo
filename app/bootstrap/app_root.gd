@@ -277,15 +277,16 @@ func _row_for(slot_id: StringName) -> Control:
 	return null
 
 func _rebind_player(player: PlayerController) -> Error:
-	if player == null:
+	if player == null or SceneDirector.get_player() != player:
 		return ERR_INVALID_PARAMETER
-	var detector := player.get_node_or_null("InteractionDetector") as InteractionDetector
-	var router := player.get_node_or_null("InteractionRouter") as InteractionRouter
+	var detector := SceneDirector.get_interaction_detector()
+	var router := SceneDirector.get_interaction_router()
 	if detector == null or router == null:
 		return ERR_DOES_NOT_EXIST
 	router.detector = detector
 	_disconnect_adapter(router, dialogue_adapter.handle_action)
 	_disconnect_adapter(router, door_adapter.handle_action)
+	detector.current_target = null
 	router.action_requested.connect(dialogue_adapter.handle_action)
 	door_adapter.scene_director = SceneDirector
 	router.action_requested.connect(door_adapter.handle_action)

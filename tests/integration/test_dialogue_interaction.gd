@@ -267,7 +267,7 @@ func _cleanup_document_event_resolution(adapter: Node, dialogue: DialogueService
 		DirAccess.remove_absolute(absolute_directory)
 
 func _test_visible_mirror_keyboard_flow(app: Node, router: InteractionRouter, dialogue: DialogueService, view: DialogueView, probe: UnhandledInputProbe) -> void:
-	var room := _current_map(app)
+	var room := SceneDirector.get_current_map()
 	var prompt := app.get_node_or_null("UILayer/InteractionPrompt") as InteractionPrompt
 	assert_not_null(room, "AppRoot exposes the foundation room")
 	assert_not_null(prompt, "AppRoot exposes the interaction prompt")
@@ -399,7 +399,7 @@ func _test_plan3_replacement_snapshot(app: Node, dialogue: DialogueService, view
 	loader.base_directory = output_directory
 	dialogue.graph_loader = loader
 	GameSession.narrative_state.set_flag(&"mirror_seen", false)
-	var room := _current_map(app)
+	var room := SceneDirector.get_current_map()
 	assert_not_null(room, "replacement snapshot uses the real foundation room")
 	if room == null:
 		_cleanup_plan3_replacement(dialogue, original_loader, snapshot_path, absolute_directory)
@@ -524,7 +524,3 @@ func _send_action(action: StringName, pressed: bool) -> void:
 	event.pressed = pressed
 	event.strength = 1.0 if pressed else 0.0
 	Input.parse_input_event(event)
-
-func _current_map(app: Node) -> MapScene:
-	var host := app.get_node_or_null("WorldHost")
-	return host.get_child(0) as MapScene if host != null and host.get_child_count() == 1 else null

@@ -47,4 +47,8 @@ func run() -> void:
 		var shipped_room = shipped_registry.definition(&"foundation_room")
 		assert_not_null(shipped_room, "the shipped registry resolves foundation room")
 		if shipped_room != null:
-			assert_eq(shipped_room.display_name, "Foundation Room", "display names are available for save metadata")
+			assert_eq(shipped_room.display_name, "기초 방", "room display name matches shipped Korean slot metadata")
+		var shipped_hall = shipped_registry.definition(&"foundation_hall")
+		assert_not_null(shipped_hall, "the shipped registry resolves foundation hall")
+		if shipped_hall != null:
+			assert_eq(shipped_hall.display_name, "기초 홀", "hall display name matches shipped Korean slot metadata")

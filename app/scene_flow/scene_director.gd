@@ -54,6 +54,20 @@ func start_new_game(map_id: StringName = &"foundation_room", spawn_id: StringNam
 func set_map_rebinder(rebinder: Callable) -> void:
 	_map_rebinder = rebinder
 
+func get_current_map() -> MapScene:
+	return _current_map if is_instance_valid(_current_map) else null
+
+func get_player() -> PlayerController:
+	return player if is_instance_valid(player) else null
+
+func get_interaction_detector() -> InteractionDetector:
+	var current_player := get_player()
+	return current_player.get_node_or_null("InteractionDetector") as InteractionDetector if current_player != null else null
+
+func get_interaction_router() -> InteractionRouter:
+	var current_player := get_player()
+	return current_player.get_node_or_null("InteractionRouter") as InteractionRouter if current_player != null else null
+
 func set_player_placement_hook(hook: Callable) -> void:
 	_player_placement_hook = hook
 
@@ -160,6 +174,8 @@ func commit_restore(plan: Dictionary) -> Error:
 		if old_map != null:
 			_world_host.add_child(old_map)
 		var rollback_failures := _restore_player(old_body_parent, old_visual_parent, old_position, old_facing)
+		if old_map != null:
+			_append_restore_failure(rollback_failures, &"camera", _configure_player_camera(old_map))
 		if old_map != null and _map_rebinder.is_valid() and player != null:
 			var rebind_error: Error = int(_map_rebinder.call(player))
 			_append_restore_failure(rollback_failures, &"map_rebind", rebind_error)
@@ -233,6 +249,8 @@ func rollback_restore() -> Error:
 	)
 	_current_map = old_map
 	_current_spawn_id = _pending_restore.get("old_spawn_id", &"")
+	if old_map != null:
+		_append_restore_failure(rollback_failures, &"camera", _configure_player_camera(old_map))
 	if old_map != null and _map_rebinder.is_valid() and player != null:
 		var rebind_error: Error = int(_map_rebinder.call(player))
 		_append_restore_failure(rollback_failures, &"map_rebind", rebind_error)
@@ -291,7 +309,22 @@ func _place_player(map: MapScene, spawn_id: StringName) -> Error:
 	if player.get_parent() != actor_root:
 		actor_root.add_child(player) if player.get_parent() == null else player.reparent(actor_root, true)
 	player.global_position = spawn.global_position
-	return player.attach_presentation(visual_root)
+	var presentation_error := player.attach_presentation(visual_root)
+	if presentation_error != OK:
+		return presentation_error
+	return _configure_player_camera(map)
+
+func _configure_player_camera(map: MapScene) -> Error:
+	if player == null or map == null or map.room_bounds.size.x <= 0.0 or map.room_bounds.size.y <= 0.0:
+		return ERR_INVALID_DATA
+	var camera := player.get_node_or_null("Camera2D") as Camera2D
+	if camera == null:
+		return ERR_DOES_NOT_EXIST
+	camera.limit_left = floori(map.room_bounds.position.x)
+	camera.limit_top = floori(map.room_bounds.position.y)
+	camera.limit_right = ceili(map.room_bounds.end.x)
+	camera.limit_bottom = ceili(map.room_bounds.end.y)
+	return OK
 
 func _restore_player(body_parent: Node, visual_parent: Node, previous_position: Vector2, previous_facing: Vector2) -> Array[Dictionary]:
 	var failures: Array[Dictionary] = []
