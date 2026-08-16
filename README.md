@@ -52,6 +52,7 @@ python tools/project.py test --filter dialogue
 - [프로젝트 로드맵](docs/ROADMAP.md)
 - [프로젝트 아키텍처](docs/ARCHITECTURE.md)
 - [대화 작성 가이드](docs/dialogue-authoring-guide.md)
+- [공유 작업 규칙](AGENTS.md)
 
 ## 현재 작업 방향
 

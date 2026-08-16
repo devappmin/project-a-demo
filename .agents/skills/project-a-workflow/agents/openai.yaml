@@ -1,0 +1,4 @@
+interface:
+  display_name: "Project A Workflow"
+  short_description: "Work safely in the Project A Godot repository"
+  default_prompt: "Use the Project A workflow and tracked project documents to complete this task."
