@@ -3,9 +3,10 @@ class_name DialogueGraphLoader
 
 const DialogueGraphResource = preload("res://game/narrative/dialogue/dialogue_graph.gd")
 const DialogueGraphValidatorResource = preload("res://game/narrative/dialogue/dialogue_graph_validator.gd")
+const DefaultCharacterRegistry = preload("res://data/characters/character_registry.tres")
 
 var base_directory: String = "res://data/generated/dialogues"
-var character_keys: Array[StringName] = [&"retti", &"jellyppo"]
+var character_registry: Resource = DefaultCharacterRegistry
 var last_failure: Dictionary = {}
 var last_issues: Array[Dictionary] = []
 
@@ -34,6 +35,7 @@ func load_scene(scene_key: StringName) -> DialogueGraphResource:
 		_fail("parse_failed", "dialogue scene JSON root must be a dictionary", path)
 		return null
 	var data: Dictionary = data_value
+	var character_keys: Array[StringName] = character_registry.character_keys() if character_registry != null else []
 	last_issues = DialogueGraphValidatorResource.validate(data, character_keys)
 	if String(data.get("scene_key", "")) != requested_key:
 		last_issues.append({

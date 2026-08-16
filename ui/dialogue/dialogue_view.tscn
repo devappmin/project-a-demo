@@ -1,8 +1,7 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://ui/dialogue/dialogue_view.gd" id="1_view"]
-[ext_resource type="Resource" path="res://data/characters/retti.tres" id="2_retti"]
-[ext_resource type="Resource" path="res://data/characters/jellyppo.tres" id="3_jellyppo"]
+[ext_resource type="Resource" path="res://data/characters/character_registry.tres" id="2_registry"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBox_panel"]
 bg_color = Color(0.035, 0.043, 0.059, 0.96)
@@ -30,7 +29,7 @@ grow_horizontal = 2
 grow_vertical = 0
 mouse_filter = 1
 script = ExtResource("1_view")
-character_definitions = Array[Resource]([ExtResource("2_retti"), ExtResource("3_jellyppo")])
+character_registry = ExtResource("2_registry")
 
 [node name="Panel" type="PanelContainer" parent="."]
 layout_mode = 1

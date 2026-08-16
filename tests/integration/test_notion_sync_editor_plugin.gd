@@ -35,7 +35,6 @@ func _test_generated_dialogue_is_playable_without_credentials() -> void:
 	OS.set_environment("PROJECT_A_NOTION_TOKEN", "")
 	var loader := DialogueGraphLoader.new()
 	loader.base_directory = GENERATED_DIRECTORY
-	loader.character_keys = [&"retti", &"jellyppo"]
 	var graph := loader.load_scene(&"foundation.inspect")
 	OS.set_environment("PROJECT_A_NOTION_TOKEN", saved_token)
 	assert_not_null(graph, "generated foundation dialogue loads with no Notion credentials")

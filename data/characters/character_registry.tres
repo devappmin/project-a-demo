@@ -1,0 +1,9 @@
+[gd_resource type="Resource" script_class="CharacterRegistry" load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://data/characters/character_registry.gd" id="1_registry"]
+[ext_resource type="Resource" path="res://data/characters/retti.tres" id="2_retti"]
+[ext_resource type="Resource" path="res://data/characters/jellyppo.tres" id="3_jellyppo"]
+
+[resource]
+script = ExtResource("1_registry")
+definitions = Array[Resource]([ExtResource("2_retti"), ExtResource("3_jellyppo")])

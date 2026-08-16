@@ -17,7 +17,10 @@ static func number(page: Dictionary, property_name: String) -> Dictionary:
 	var property_result := _property(page, property_name, "number")
 	if not property_result["ok"]:
 		return property_result
-	return _ok(property_result["value"].get("number"))
+	var value: Variant = property_result["value"].get("number")
+	if typeof(value) != TYPE_INT and typeof(value) != TYPE_FLOAT:
+		return _error("property %s must contain a number" % property_name)
+	return _ok(float(value))
 
 static func select(page: Dictionary, property_name: String) -> Dictionary:
 	var property_result := _property(page, property_name, "select")

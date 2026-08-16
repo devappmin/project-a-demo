@@ -199,8 +199,6 @@ func _validate_loader(loader_script: Variant) -> void:
 	var loader: Variant = loader_script.new()
 	assert_eq(loader.base_directory, "res://data/generated/dialogues", "loader has the generated dialogue default")
 	loader.base_directory = "res://tests/fixtures/dialogues"
-	var loader_characters: Array[StringName] = [&"retti", &"jellyppo"]
-	loader.character_keys = loader_characters
 	var graph: Variant = loader.load_scene(&"valid.branch")
 	assert_not_null(graph, "loader resolves dotted scene keys below its base directory")
 	if graph != null:
@@ -247,8 +245,6 @@ func _validate_loader_control_flow_contract(loader_script: Variant) -> void:
 		file.close()
 	var loader: Variant = loader_script.new()
 	loader.base_directory = output_directory
-	var loader_characters: Array[StringName] = [&"retti"]
-	loader.character_keys = loader_characters
 	var allowed: Variant = loader.load_scene(&"loader.allowed")
 	assert_not_null(allowed, "loader accepts the exact 256 automatic-node boundary")
 	assert_eq(loader.load_scene(&"loader.rejected"), null, "loader rejects a 257 automatic-node segment")

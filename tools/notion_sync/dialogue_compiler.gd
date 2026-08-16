@@ -3,8 +3,10 @@ extends RefCounted
 class_name DialogueCompiler
 
 const Validator = preload("res://game/narrative/dialogue/dialogue_graph_validator.gd")
+const DefaultCharacterRegistry = preload("res://data/characters/character_registry.tres")
 
-static func compile(input: Dictionary) -> Dictionary:
+static func compile(input: Dictionary, character_registry: Resource = null) -> Dictionary:
+	var local_registry: Resource = character_registry if character_registry != null else DefaultCharacterRegistry
 	var issues: Array[Dictionary] = []
 	var scenes := _dictionary_array(input.get("scenes"), "scenes", issues)
 	var blocks := _dictionary_array(input.get("blocks"), "blocks", issues)
@@ -17,13 +19,12 @@ static func compile(input: Dictionary) -> Dictionary:
 	_collect_mapping_errors(characters, issues)
 	if scenes.is_empty():
 		issues.append(_issue("error", "empty_source", "", "", "dialogue source must contain at least one scene", {}))
-	var character_keys: Array[StringName] = []
+	_validate_notion_characters(characters, local_registry, issues)
+	var character_keys: Array[StringName] = local_registry.character_keys() if local_registry != null else []
 	var expression_catalog := {}
 	for character: Dictionary in characters:
 		var character_key := String(character.get("character_key", ""))
-		character_keys.append(StringName(character_key))
 		expression_catalog[character_key] = character.get("expressions", []).duplicate(true) if typeof(character.get("expressions")) == TYPE_ARRAY else []
-	var invalid_character_sources := _invalid_character_sources(characters)
 	var graphs := {}
 	var scene_statuses := {}
 	var filenames := {}
@@ -54,14 +55,8 @@ static func compile(input: Dictionary) -> Dictionary:
 		var graph: Dictionary = compiled["graph"]
 		graphs[scene_key] = graph
 		var validator_issues: Array[Dictionary] = Validator.validate(graph, character_keys)
-		var invalid_character_index := 0
 		for validator_issue: Dictionary in validator_issues:
-			var source: Dictionary
-			if String(validator_issue.get("code", "")) == "invalid_character_key" and invalid_character_index < invalid_character_sources.size():
-				source = invalid_character_sources[invalid_character_index]
-				invalid_character_index += 1
-			else:
-				source = _validator_issue_source(validator_issue, compiled, scene)
+			var source: Dictionary = _validator_issue_source(validator_issue, compiled, scene)
 			var linked_issue := validator_issue.duplicate(true)
 			linked_issue["notion_page_id"] = String(source.get("notion_page_id", ""))
 			linked_issue["source_url"] = String(source.get("source_url", ""))
@@ -263,16 +258,27 @@ static func _collect_mapping_errors(items: Array[Dictionary], issues: Array[Dict
 		for message: Variant in errors:
 			issues.append(_issue("error", "mapping_error", String(item.get("scene_key", "")), _node_id(item), String(message), item))
 
-static func _invalid_character_sources(characters: Array[Dictionary]) -> Array[Dictionary]:
-	var invalid: Array[Dictionary] = []
+static func _validate_notion_characters(characters: Array[Dictionary], character_registry: Resource, issues: Array[Dictionary]) -> void:
 	var seen := {}
 	for character: Dictionary in characters:
 		var character_key := String(character.get("character_key", ""))
 		if character_key.is_empty() or seen.has(character_key):
-			invalid.append(character)
-		else:
-			seen[character_key] = true
-	return invalid
+			issues.append(_issue("error", "invalid_character_key", "", "", "character_key must be nonempty and unique", character))
+			continue
+		seen[character_key] = true
+		if character_registry == null or not character_registry.has_character(StringName(character_key)):
+			issues.append(_issue("error", "unknown_local_character", "", "", "Notion character is not defined in the local character registry", character))
+			continue
+		var default_expression := String(character.get("default_expression", ""))
+		if not character_registry.has_expression(StringName(character_key), StringName(default_expression)):
+			issues.append(_issue("error", "unknown_local_default_expression", "", "", "Notion default expression is not defined for the local character", character))
+		var expressions: Variant = character.get("expressions", [])
+		if typeof(expressions) != TYPE_ARRAY:
+			continue
+		for expression_value: Variant in expressions:
+			var expression := String(expression_value)
+			if not character_registry.has_expression(StringName(character_key), StringName(expression)):
+				issues.append(_issue("error", "unknown_local_expression", "", "", "Notion expression '%s' is not defined for the local character" % expression, character))
 
 static func _validator_issue_source(validator_issue: Dictionary, compiled: Dictionary, scene: Dictionary) -> Dictionary:
 	var node_id := String(validator_issue.get("node_id", ""))

@@ -2,11 +2,12 @@ extends Control
 class_name DialogueView
 
 const GameModeResource = preload("res://app/session/game_mode.gd")
+const DefaultCharacterRegistry = preload("res://data/characters/character_registry.tres")
 
 signal advance_requested
 signal choice_requested(index: int)
 
-@export var character_definitions: Array[Resource] = []
+@export var character_registry: Resource = DefaultCharacterRegistry
 
 @onready var portrait: TextureRect = $Panel/Margin/Layout/Portrait
 @onready var name_label: Label = $Panel/Margin/Layout/Content/NameLabel
@@ -18,9 +19,10 @@ signal choice_requested(index: int)
 var _characters: Dictionary = {}
 
 func _ready() -> void:
-	for definition: Resource in character_definitions:
-		if definition != null and not definition.character_key.is_empty():
-			_characters[definition.character_key] = definition
+	_characters.clear()
+	if character_registry != null:
+		for character_key: StringName in character_registry.character_keys():
+			_characters[character_key] = character_registry.get_definition(character_key)
 	hide_dialogue()
 
 func show_line(character_key: StringName, expression: StringName, text: String) -> void:

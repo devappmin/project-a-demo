@@ -22,6 +22,7 @@ func run() -> void:
 	_test_character_mapping(character_page)
 	_test_property_reader(block_page)
 	_test_hidden_json_root_types(scene_page, block_page, character_page)
+	_test_required_semantics(scene_page, block_page, character_page)
 
 func _test_scene_mapping(page: Dictionary) -> void:
 	var scene := NotionMapper.map_scene(page)
@@ -88,6 +89,45 @@ func _test_hidden_json_root_types(scene_page: Dictionary, block_page: Dictionary
 		})
 		assert_false(compiled["ok"], "%s wrong root blocks compilation" % case["property"])
 		assert_true(_has_mapping_issue(compiled.get("issues", []), String(page["url"]), String(case["property"])), "%s wrong root remains source-linked" % case["property"])
+
+func _test_required_semantics(scene_page: Dictionary, block_page: Dictionary, character_page: Dictionary) -> void:
+	var scene_status_page := scene_page.duplicate(true)
+	scene_status_page["properties"]["status"]["select"]["name"] = "Published"
+	var invalid_scene := NotionMapper.map_scene(scene_status_page)
+	_assert_mapped_error_is_linked(invalid_scene, [invalid_scene], [], [NotionMapper.map_character(character_page)], "status", String(scene_page["url"]), "unknown scene status")
+	for order_value: Variant in [null, "1"]:
+		var order_page := block_page.duplicate(true)
+		order_page["properties"]["order"]["number"] = order_value
+		var invalid_order := NotionMapper.map_block(order_page)
+		assert_eq(invalid_order["order"], null, "invalid order is not silently coerced to zero")
+		_assert_mapped_error_is_linked(invalid_order, [NotionMapper.map_scene(scene_page)], [invalid_order], [NotionMapper.map_character(character_page)], "order", String(block_page["url"]), "invalid order %s" % order_value)
+	var invalid_type_page := block_page.duplicate(true)
+	invalid_type_page["properties"]["type"]["select"]["name"] = "video"
+	var invalid_type := NotionMapper.map_block(invalid_type_page)
+	_assert_mapped_error_is_linked(invalid_type, [NotionMapper.map_scene(scene_page)], [invalid_type], [NotionMapper.map_character(character_page)], "type", String(block_page["url"]), "unknown block type")
+	for relation_case: Dictionary in [
+		{"name":"empty scene relation", "property":"scene", "relations":[], "block_type":"line"},
+		{"name":"multiple scene relations", "property":"scene", "relations":[{"id":scene_page["id"]}, {"id":"other-scene"}], "block_type":"line"},
+		{"name":"empty line speaker", "property":"speaker", "relations":[], "block_type":"line"},
+		{"name":"multiple line speakers", "property":"speaker", "relations":[{"id":character_page["id"]}, {"id":"other-character"}], "block_type":"line"},
+		{"name":"multiple non-line speakers", "property":"speaker", "relations":[{"id":character_page["id"]}, {"id":"other-character"}], "block_type":"effect"}
+	]:
+		var relation_page := block_page.duplicate(true)
+		relation_page["properties"]["type"]["select"]["name"] = relation_case["block_type"]
+		relation_page["properties"][relation_case["property"]]["relation"] = relation_case["relations"]
+		var invalid_relation := NotionMapper.map_block(relation_page)
+		_assert_mapped_error_is_linked(invalid_relation, [NotionMapper.map_scene(scene_page)], [invalid_relation], [NotionMapper.map_character(character_page)], String(relation_case["property"]), String(block_page["url"]), String(relation_case["name"]))
+	var optional_speaker_page := block_page.duplicate(true)
+	optional_speaker_page["properties"]["type"]["select"]["name"] = "effect"
+	optional_speaker_page["properties"]["speaker"]["relation"] = []
+	var optional_speaker := NotionMapper.map_block(optional_speaker_page)
+	assert_false(_errors_contain(optional_speaker.get("errors", []), "speaker"), "non-line speaker relation may be empty")
+
+func _assert_mapped_error_is_linked(mapped: Dictionary, scenes: Array, blocks: Array, characters: Array, property_name: String, source_url: String, label: String) -> void:
+	assert_true(_errors_contain(mapped.get("errors", []), property_name), "%s is retained as a property-named mapping error" % label)
+	var compiled := DialogueCompiler.compile({"scenes":scenes, "blocks":blocks, "characters":characters})
+	assert_false(compiled["ok"], "%s blocks compilation" % label)
+	assert_true(_has_mapping_issue(compiled.get("issues", []), source_url, property_name), "%s mapping error remains source-linked" % label)
 
 func _page_fixture(filename: String) -> Dictionary:
 	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string("res://tests/fixtures/notion/" + filename))
