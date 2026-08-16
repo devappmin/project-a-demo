@@ -19,6 +19,11 @@ func run() -> void:
 	_validate_loops_rejoins_and_later_choices(compiler, fixture, catalog, characters)
 	_validate_comment_invariance(compiler, fixture, catalog, characters)
 	_validate_nondefault_event_graph_errors(compiler, fixture, catalog, characters)
+	_validate_invalid_catalog_fails_closed(compiler, fixture, catalog_script, characters)
+	_validate_reserved_artifact_collision(compiler, fixture, catalog, characters)
+	_validate_authored_synthetic_node_collision(compiler, fixture, catalog, characters)
+	_validate_structural_source_entries(compiler, fixture, catalog, characters)
+	_validate_unreachable_flow_warning(compiler, fixture, catalog, characters)
 
 func _validate_complete_graph(compiler: Variant, fixture: Variant, catalog: Variant, characters: Resource) -> void:
 	var result: Dictionary = _compile(compiler, fixture.valid_bundle(), catalog, characters)
@@ -136,6 +141,64 @@ func _validate_nondefault_event_graph_errors(compiler: Variant, fixture: Variant
 	var issue := _issue_with_code(result.get("issues", []), "cycle_without_exit")
 	assert_false(issue.is_empty(), "compiler passes every event entry through graph validation")
 	assert_eq(issue.get("source_url", ""), "https://www.notion.so/foundation", "compiler graph issues retain the normalized source URL")
+
+func _validate_invalid_catalog_fails_closed(compiler: Variant, fixture: Variant, catalog_script: Variant, characters: Resource) -> void:
+	var catalog_data := _catalog_data()
+	catalog_data["terms"].append(catalog_data["terms"][0].duplicate(true))
+	var invalid_catalog: Variant = catalog_script.from_dictionary(catalog_data)
+	assert_false(invalid_catalog.validate_catalog().is_empty(), "regression catalog is structurally invalid")
+	var result: Dictionary = _compile(compiler, fixture.valid_bundle(), invalid_catalog, characters)
+	assert_false(result.get("ok", true), "invalid catalogs fail closed before bundle compilation")
+	assert_false(_issue_with_code(result.get("issues", []), "duplicate_term").is_empty(), "catalog validation keeps its stable issue code")
+	assert_true(result.get("graphs", {}).is_empty(), "invalid catalog produces no partially compiled graphs")
+
+func _validate_reserved_artifact_collision(compiler: Variant, fixture: Variant, catalog: Variant, characters: Resource) -> void:
+	var bundle: Dictionary = fixture.valid_bundle()
+	bundle["bundle_key"] = "source.map"
+	var result: Dictionary = _compile(compiler, bundle, catalog, characters)
+	assert_false(result.get("ok", true), "bundle filenames cannot collide with reserved artifacts")
+	assert_false(_issue_with_code(result.get("issues", []), "reserved_artifact_filename").is_empty(), "reserved artifact collision has a stable issue")
+	assert_false(result.get("graphs", {}).has("source.map"), "reserved artifact collision is rejected before graph publication")
+
+func _validate_authored_synthetic_node_collision(compiler: Variant, fixture: Variant, catalog: Variant, characters: Resource) -> void:
+	var bundle: Dictionary = fixture.valid_bundle()
+	var rejoin: Dictionary = bundle["triggers"][0]["events"][1]["flows"][3]
+	rejoin["blocks"][0]["block_key"] = "end_a35b537a36d9.event_results"
+	var result: Dictionary = _compile(compiler, bundle, catalog, characters)
+	assert_false(result.get("ok", true), "synthetic result nodes never overwrite authored dotted node IDs")
+	assert_false(_issue_with_code(result.get("issues", []), "generated_node_collision").is_empty(), "authored and synthetic node collision has a stable issue")
+
+func _validate_structural_source_entries(compiler: Variant, fixture: Variant, catalog: Variant, characters: Resource) -> void:
+	var result: Dictionary = _compile(compiler, fixture.valid_bundle(), catalog, characters)
+	assert_true(result.get("ok", false), "source-map fixture compiles")
+	if not result.get("ok", false):
+		return
+	var candidates: Array = result["events"]["bundles"]["foundation.inspect"]["triggers"]["mirror.inspect"]
+	assert_eq(_node_for_source(result["source_map"], "notion-event-seen"), candidates[0]["entry_node"], "event source maps to its generated event entry")
+	assert_eq(_node_for_source(result["source_map"], "notion-event-default"), candidates[1]["entry_node"], "fallback event source maps to its generated event entry")
+	assert_eq(_node_for_source(result["source_map"], "notion-flow-start"), candidates[1]["entry_node"], "start flow source maps to its generated flow entry")
+	assert_eq(_node_for_source(result["source_map"], "notion-flow-inspect"), _node_for_source(result["source_map"], "notion-block-inspect"), "non-start flow source maps to its first generated node")
+
+func _validate_unreachable_flow_warning(compiler: Variant, fixture: Variant, catalog: Variant, characters: Resource) -> void:
+	var bundle: Dictionary = fixture.valid_bundle()
+	bundle["triggers"][0]["events"][1]["flows"].append({
+		"source_id":"notion-flow-orphan",
+		"flow_key":"orphan",
+		"name":"도달하지 않는 흐름",
+		"effects":[],
+		"blocks":[
+			{"type":"line", "source_id":"notion-block-orphan-line", "speaker":"retti", "expression":"neutral", "text":"아무도 듣지 못한다."},
+			{"type":"end", "source_id":"notion-block-orphan-end"},
+		],
+	})
+	var result: Dictionary = _compile(compiler, bundle, catalog, characters)
+	assert_true(result.get("ok", false), "unreachable flows warn without blocking compilation")
+	var issue := _issue_with_code(result.get("issues", []), "unreachable_flow")
+	assert_false(issue.is_empty(), "unreachable authored flow produces one stable warning")
+	assert_eq(issue.get("severity", ""), "warning", "unreachable flow is non-blocking")
+	assert_eq(issue.get("flow_key", ""), "orphan", "unreachable warning identifies the authored flow")
+	assert_eq(issue.get("source_id", ""), "notion-flow-orphan", "unreachable warning links to the authored flow source")
+	assert_eq(issue.get("source_url", ""), "https://www.notion.so/foundation", "unreachable warning retains its normalized source URL")
 
 func _node_for_source(source_map: Dictionary, source_id: String) -> String:
 	for entry_value: Variant in source_map.get("sources", []):

@@ -125,10 +125,17 @@ func _validate_event_entries(validator: Variant) -> void:
 	var graph := _minimal_graph()
 	graph["nodes"]["second"] = {"type":"end"}
 	var characters: Array[StringName] = [&"retti"]
+	assert_false(_has_code_at(_validate(validator, graph, characters), "unreachable_node", "second"), "legacy two-argument validation does not infer event reachability")
 	var valid_entries: Array[StringName] = [&"end", &"second"]
-	assert_false(_has_code(validator.validate(graph, characters, valid_entries), "invalid_event_entry"), "existing event entries are accepted")
+	var rooted_issues: Array = validator.validate(graph, characters, valid_entries)
+	assert_false(_has_code(rooted_issues, "invalid_event_entry"), "existing event entries are accepted")
+	assert_false(_has_code_at(rooted_issues, "unreachable_node", "second"), "every supplied event entry participates in reachability")
 	var invalid_entries: Array[StringName] = [&"second", &"missing"]
 	assert_true(_has_code_at(validator.validate(graph, characters, invalid_entries), "invalid_event_entry", "missing"), "missing event entries have a stable issue")
+	graph["nodes"]["orphan"] = {"type":"end"}
+	var reachability_issues: Array = validator.validate(graph, characters, valid_entries)
+	assert_true(_has_code_at(reachability_issues, "unreachable_node", "orphan"), "nodes outside every dialogue entry root are reported")
+	assert_eq(_issue_at(reachability_issues, "unreachable_node", "orphan").get("severity", ""), "warning", "unreachable nodes are warnings")
 
 func _validate_reachable_cycles(validator: Variant) -> void:
 	var trapped := _minimal_graph()
@@ -312,3 +319,9 @@ func _has_code_at(issues: Array, code: String, node_id: String) -> bool:
 		if typeof(issue_value) == TYPE_DICTIONARY and issue_value.get("code", "") == code and issue_value.get("node_id", "") == node_id:
 			return true
 	return false
+
+func _issue_at(issues: Array, code: String, node_id: String) -> Dictionary:
+	for issue_value: Variant in issues:
+		if typeof(issue_value) == TYPE_DICTIONARY and issue_value.get("code", "") == code and issue_value.get("node_id", "") == node_id:
+			return issue_value
+	return {}

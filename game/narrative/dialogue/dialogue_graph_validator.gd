@@ -27,6 +27,7 @@ static func validate(data: Dictionary, character_keys: Array[StringName], entry_
 		_validate_node(node_id, nodes[node_id], nodes, characters, scene_key, adjacency, issues)
 	_validate_cycle_exits(adjacency, scene_key, issues)
 	_validate_automatic_path_lengths(nodes, node_ids, scene_key, issues)
+	_validate_reachability(data, entry_nodes, node_ids, nodes, adjacency, scene_key, issues)
 	return issues
 
 static func _scene_key(data: Dictionary) -> String:
@@ -293,6 +294,26 @@ static func _validate_automatic_path_lengths(nodes: Dictionary, node_ids: Array[
 				break
 			current_id = String(next_value)
 
+static func _validate_reachability(data: Dictionary, entry_nodes: Array[StringName], node_ids: Array[String], nodes: Dictionary, adjacency: Dictionary, scene_key: String, issues: Array[Dictionary]) -> void:
+	if entry_nodes.is_empty():
+		return
+	var roots: Array[String] = []
+	var default_entry := String(data.get("entry_node", ""))
+	if nodes.has(default_entry):
+		roots.append(default_entry)
+	for event_entry: StringName in entry_nodes:
+		var entry := String(event_entry)
+		if nodes.has(entry) and entry not in roots:
+			roots.append(entry)
+	var reachable: Dictionary = {}
+	for root: String in roots:
+		var from_root := _reachable_from(root, adjacency, {})
+		for node_id: Variant in from_root.keys():
+			reachable[node_id] = true
+	for node_id: String in node_ids:
+		if not reachable.has(node_id):
+			_add_warning(issues, "unreachable_node", scene_key, node_id, "node cannot be reached from the default or supplied event entries")
+
 static func _reachable_from(start: String, adjacency: Dictionary, allowed: Dictionary) -> Dictionary:
 	var visited := {}
 	var pending: Array[String] = [start]
@@ -311,6 +332,15 @@ static func _reachable_from(start: String, adjacency: Dictionary, allowed: Dicti
 static func _add_issue(issues: Array[Dictionary], code: String, scene_key: String, node_id: String, message: String) -> void:
 	issues.append({
 		"severity": "error",
+		"code": code,
+		"scene_key": scene_key,
+		"node_id": node_id,
+		"message": message
+	})
+
+static func _add_warning(issues: Array[Dictionary], code: String, scene_key: String, node_id: String, message: String) -> void:
+	issues.append({
+		"severity": "warning",
 		"code": code,
 		"scene_key": scene_key,
 		"node_id": node_id,

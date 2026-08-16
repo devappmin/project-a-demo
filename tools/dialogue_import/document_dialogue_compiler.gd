@@ -6,6 +6,7 @@ const Identity = preload("res://tools/dialogue_import/dialogue_identity.gd")
 const GraphValidator = preload("res://game/narrative/dialogue/dialogue_graph_validator.gd")
 const DefaultCatalog = preload("res://game/narrative/catalog/narrative_catalog.gd")
 const DefaultCharacters = preload("res://data/characters/character_registry.tres")
+const RESERVED_ARTIFACT_FILENAMES := ["manifest.json", "events.json", "source_map.json"]
 
 static func compile_bundles(bundles: Array[Dictionary], catalog: NarrativeCatalog = null, characters: Resource = null) -> Dictionary:
 	var local_catalog: NarrativeCatalog = catalog if catalog != null else DefaultCatalog.load_default()
@@ -16,6 +17,10 @@ static func compile_bundles(bundles: Array[Dictionary], catalog: NarrativeCatalo
 	var source_entries: Array[Dictionary] = []
 	var filenames: Dictionary = {}
 	var ordered_bundles: Array[Dictionary] = bundles.duplicate(true)
+	for catalog_issue: Dictionary in local_catalog.validate_catalog():
+		issues.append(_issue("error", String(catalog_issue.get("code", "invalid_catalog")), String(catalog_issue.get("message", "narrative catalog is invalid")), {}, ""))
+	if _has_errors(issues):
+		return _compile_result(graphs, event_bundles, source_entries, issues)
 	ordered_bundles.sort_custom(_bundle_less)
 	for bundle: Dictionary in ordered_bundles:
 		var schema_issues: Array[Dictionary] = AuthoringSchema.validate_bundle(bundle, local_catalog, local_characters)
@@ -32,6 +37,9 @@ static func compile_bundles(bundles: Array[Dictionary], catalog: NarrativeCatalo
 			continue
 		var filename := _bundle_filename(bundle_key)
 		var filename_identity := filename.to_lower()
+		if filename_identity in RESERVED_ARTIFACT_FILENAMES:
+			issues.append(_issue("error", "reserved_artifact_filename", "bundle_key collides with a reserved runtime artifact", _context(bundle), ""))
+			continue
 		if filenames.has(filename_identity):
 			issues.append(_issue("error", "duplicate_artifact_filename", "bundle_key collides with another artifact filename", _context(bundle), ""))
 			continue
@@ -41,27 +49,25 @@ static func compile_bundles(bundles: Array[Dictionary], catalog: NarrativeCatalo
 		var graph: Dictionary = compiled["graph"]
 		var character_keys: Array[StringName] = local_characters.character_keys() if local_characters != null and local_characters.has_method("character_keys") else []
 		var entry_nodes: Array[StringName] = compiled["entry_nodes"]
+		var unreachable_flows: Dictionary = {}
 		for validator_issue: Dictionary in GraphValidator.validate(graph, character_keys, entry_nodes):
 			var node_id := String(validator_issue.get("node_id", ""))
 			var source_context: Dictionary = compiled["node_contexts"].get(node_id, _context(bundle))
-			issues.append(_issue(String(validator_issue.get("severity", "error")), String(validator_issue.get("code", "graph_validation_failed")), String(validator_issue.get("message", "graph validation failed")), source_context, node_id))
+			var issue_code := String(validator_issue.get("code", "graph_validation_failed"))
+			var issue_message := String(validator_issue.get("message", "graph validation failed"))
+			if issue_code == "unreachable_node" and not String(source_context.get("flow_key", "")).is_empty():
+				var flow_identity := "%s\n%s" % [source_context.get("event_key", ""), source_context.get("flow_key", "")]
+				if unreachable_flows.has(flow_identity):
+					continue
+				unreachable_flows[flow_identity] = true
+				source_context = compiled["flow_contexts"].get(flow_identity, source_context)
+				issue_code = "unreachable_flow"
+				issue_message = "flow cannot be reached from any dialogue event entry"
+			issues.append(_issue(String(validator_issue.get("severity", "error")), issue_code, issue_message, source_context, node_id))
 		graphs[bundle_key] = graph
 		event_bundles[bundle_key] = {"triggers":compiled["triggers"]}
 		source_entries.append_array(compiled["sources"])
-	source_entries.sort_custom(_source_less)
-	var events := {"schema_version":1, "bundles":event_bundles}
-	var source_map := {"schema_version":1, "sources":source_entries}
-	var artifacts := _build_artifacts(graphs, events, source_map)
-	var manifest := _build_manifest(artifacts, graphs.keys())
-	return {
-		"ok":not _has_errors(issues),
-		"graphs":graphs,
-		"events":events,
-		"source_map":source_map,
-		"issues":issues,
-		"manifest":manifest,
-		"artifacts":artifacts,
-	}
+	return _compile_result(graphs, event_bundles, source_entries, issues)
 
 static func stable_json(data: Variant) -> String:
 	return JSON.stringify(data, "\t", true, true)
@@ -78,6 +84,9 @@ static func _compile_bundle(bundle: Dictionary, catalog: NarrativeCatalog) -> Di
 	var event_records: Dictionary = {}
 	var flow_records: Dictionary = {}
 	var blocks_by_flow: Dictionary = {}
+	var event_source_indices: Dictionary = {}
+	var flow_source_indices: Dictionary = {}
+	var flow_contexts: Dictionary = {}
 	var bundle_context := _context(bundle)
 	_add_source(sources, bundle, bundle_context, "bundle", String(bundle.get("bundle_key", "")), "")
 	for trigger_value: Variant in bundle.get("triggers", []):
@@ -89,14 +98,17 @@ static func _compile_bundle(bundle: Dictionary, catalog: NarrativeCatalog) -> Di
 			var event_key := String(event.get("event_key", ""))
 			var event_context := _context(event, trigger_context)
 			event_records[event_key] = event
+			event_source_indices[event_key] = sources.size()
 			_add_source(sources, event, event_context, "event", event_key, "")
 			for flow_value: Variant in event.get("flows", []):
 				var flow: Dictionary = flow_value
 				var flow_key := String(flow.get("flow_key", ""))
 				var flow_identity := _flow_identity(event_key, flow_key)
 				var flow_context := _context(flow, event_context)
+				flow_contexts[flow_identity] = flow_context
 				flow_records[flow_identity] = flow
 				blocks_by_flow[flow_identity] = flow.get("blocks", [])
+				flow_source_indices[flow_identity] = sources.size()
 				_add_source(sources, flow, flow_context, "flow", flow_key, "")
 				var block_index := 0
 				for block_value: Variant in flow.get("blocks", []):
@@ -135,8 +147,9 @@ static func _compile_bundle(bundle: Dictionary, catalog: NarrativeCatalog) -> Di
 			var identity := _block_identity(flow_identity, block_index)
 			var node_id := String(block_ids[identity])
 			nodes[node_id] = {"type":"end"}
-			var target := _route_effects(nodes, node_id + ".event_results", _normalize_effects(event.get("effects", []), catalog), node_id)
-			target = _route_effects(nodes, node_id + ".flow_results", _normalize_effects(flow.get("effects", []), catalog), target)
+			var route_context: Dictionary = node_contexts.get(node_id, _context(bundle))
+			var target := _route_effects(nodes, node_contexts, node_id + ".event_results", _normalize_effects(event.get("effects", []), catalog), node_id, issues, route_context)
+			target = _route_effects(nodes, node_contexts, node_id + ".flow_results", _normalize_effects(flow.get("effects", []), catalog), target, issues, route_context)
 			block_entries[identity] = target
 	# Flow and event entries are known after end wrappers exist.
 	for flow_identity_value: Variant in blocks_by_flow.keys():
@@ -144,9 +157,11 @@ static func _compile_bundle(bundle: Dictionary, catalog: NarrativeCatalog) -> Di
 		var blocks: Array = blocks_by_flow[flow_identity]
 		if not blocks.is_empty():
 			flow_entries[flow_identity] = block_entries[_block_identity(flow_identity, 0)]
+			_set_source_node(sources, int(flow_source_indices.get(flow_identity, -1)), String(flow_entries[flow_identity]))
 	for event_key_value: Variant in event_records.keys():
 		var event_key := String(event_key_value)
 		event_entries[event_key] = String(flow_entries.get(_flow_identity(event_key, "start"), ""))
+		_set_source_node(sources, int(event_source_indices.get(event_key, -1)), String(event_entries[event_key]))
 	# Compile executable block payloads and route every flow exit through its results.
 	for flow_identity_value: Variant in blocks_by_flow.keys():
 		var flow_identity := String(flow_identity_value)
@@ -171,17 +186,19 @@ static func _compile_bundle(bundle: Dictionary, catalog: NarrativeCatalog) -> Di
 						var item: Dictionary = item_value
 						var target := _target_entry(item, event_key, flow_entries, event_entries)
 						var route_id := "%s.choice_%d" % [node_id, item_index]
+						var route_context := _context(item, node_contexts.get(node_id, _context(bundle)))
 						if String(item.get("target_kind", "")) == "event":
-							target = _route_effects(nodes, route_id + ".event_results", _normalize_effects(event.get("effects", []), catalog), target)
-						target = _route_effects(nodes, route_id + ".flow_results", _normalize_effects(flow.get("effects", []), catalog), target)
+							target = _route_effects(nodes, node_contexts, route_id + ".event_results", _normalize_effects(event.get("effects", []), catalog), target, issues, route_context)
+						target = _route_effects(nodes, node_contexts, route_id + ".flow_results", _normalize_effects(flow.get("effects", []), catalog), target, issues, route_context)
 						items.append({"text":String(item.get("text", "")), "conditions":_normalize_conditions(item.get("conditions", []), catalog), "effects":_normalize_effects(item.get("effects", []), catalog), "next":target})
 						item_index += 1
 					nodes[node_id] = {"type":"choice", "items":items}
 				"jump":
 					var target := _target_entry(block, event_key, flow_entries, event_entries)
+					var route_context: Dictionary = node_contexts.get(node_id, _context(bundle))
 					if String(block.get("target_kind", "")) == "event":
-						target = _route_effects(nodes, node_id + ".event_results", _normalize_effects(event.get("effects", []), catalog), target)
-					target = _route_effects(nodes, node_id + ".flow_results", _normalize_effects(flow.get("effects", []), catalog), target)
+						target = _route_effects(nodes, node_contexts, node_id + ".event_results", _normalize_effects(event.get("effects", []), catalog), target, issues, route_context)
+					target = _route_effects(nodes, node_contexts, node_id + ".flow_results", _normalize_effects(flow.get("effects", []), catalog), target, issues, route_context)
 					nodes[node_id] = {"type":"jump", "next":target}
 				"end":
 					pass
@@ -208,14 +225,33 @@ static func _compile_bundle(bundle: Dictionary, catalog: NarrativeCatalog) -> Di
 		"entry_nodes":entry_nodes,
 		"sources":sources,
 		"node_contexts":node_contexts,
+		"flow_contexts":flow_contexts,
 		"issues":issues,
 	}
 
-static func _route_effects(nodes: Dictionary, route_id: String, effects: Array[Dictionary], target: String) -> String:
+static func _route_effects(nodes: Dictionary, node_contexts: Dictionary, route_id: String, effects: Array[Dictionary], target: String, issues: Array[Dictionary], context: Dictionary) -> String:
 	if effects.is_empty():
 		return target
+	if nodes.has(route_id):
+		issues.append(_issue("error", "generated_node_collision", "synthetic result node collides with an existing generated node", context, route_id))
+		return target
 	nodes[route_id] = {"type":"effect", "effects":effects.duplicate(true), "next":target}
+	node_contexts[route_id] = context.duplicate(true)
 	return route_id
+
+static func _compile_result(graphs: Dictionary, event_bundles: Dictionary, source_entries: Array[Dictionary], issues: Array[Dictionary]) -> Dictionary:
+	source_entries.sort_custom(_source_less)
+	var events := {"schema_version":1, "bundles":event_bundles}
+	var source_map := {"schema_version":1, "sources":source_entries}
+	var artifacts := _build_artifacts(graphs, events, source_map)
+	var manifest := _build_manifest(artifacts, graphs.keys())
+	return {"ok":not _has_errors(issues), "graphs":graphs, "events":events, "source_map":source_map, "issues":issues, "manifest":manifest, "artifacts":artifacts}
+
+static func _set_source_node(sources: Array[Dictionary], source_index: int, node_id: String) -> void:
+	if source_index < 0 or source_index >= sources.size() or node_id.is_empty():
+		return
+	var entry: Dictionary = sources[source_index]
+	entry["node_id"] = node_id
 
 static func _target_entry(target: Dictionary, event_key: String, flow_entries: Dictionary, event_entries: Dictionary) -> String:
 	if String(target.get("target_kind", "")) == "event":
