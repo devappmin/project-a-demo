@@ -1,0 +1,5 @@
+extends SceneTree
+
+func _initialize() -> void:
+	load("res://broken_dependency.gd")
+	quit(0)
