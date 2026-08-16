@@ -28,6 +28,7 @@ func run() -> void:
 	_test_grouped_choice_and_character_provenance(compiler, fixture_factory)
 	_test_cross_platform_filename_namespace(compiler, fixture_factory)
 	_test_automatic_node_shapes_and_tiebreaking(compiler, fixture_factory)
+	_test_completely_empty_source_is_rejected(compiler)
 	_test_cli_result_presentation(cli)
 	await _test_cli_boundaries(cli, fixture_factory)
 
@@ -180,6 +181,12 @@ func _test_automatic_node_shapes_and_tiebreaking(compiler: Variant, fixture_fact
 	assert_false(duplicate_result["ok"], "duplicate stable node IDs fail compilation")
 	assert_true(_has_issue(duplicate_result["issues"], "duplicate_node_id", duplicate_block["source_url"]), "duplicate node ID links to the duplicate block")
 
+func _test_completely_empty_source_is_rejected(compiler: Variant) -> void:
+	var result: Dictionary = compiler.compile({"scenes":[], "blocks":[], "characters":[]})
+	assert_false(result["ok"], "a completely empty source cannot compile")
+	assert_true(_has_issue(result["issues"], "empty_source", ""), "empty source uses a stable diagnostic code")
+	assert_eq(result["graphs"], {}, "empty source never produces publishable graphs")
+
 func _test_cli_boundaries(cli: Variant, fixture_factory: Variant) -> void:
 	assert_true(_script_has_method(cli, "is_authorized_for"), "CLI exposes its explicit editor-binary authorization predicate")
 	assert_true(_script_has_method(cli, "exit_code_for"), "CLI exposes deterministic process-exit mapping")
@@ -195,6 +202,11 @@ func _test_cli_boundaries(cli: Variant, fixture_factory: Variant) -> void:
 	var write_result: Dictionary = cli.run_mapped_input(fixture_factory.valid_dialogue_input(), output_dir, false)
 	assert_true(write_result["ok"], "CLI mapped-input write path publishes a snapshot")
 	assert_true(FileAccess.file_exists(output_dir.path_join("manifest.json")), "CLI write path publishes the manifest")
+	var before_empty_import := _snapshot_bytes(output_dir)
+	var empty_result: Dictionary = cli.run_mapped_input({"scenes":[], "blocks":[], "characters":[]}, output_dir, false)
+	assert_false(empty_result["ok"], "CLI rejects a completely empty mapped import")
+	assert_eq(empty_result.get("error", OK), ERR_INVALID_DATA, "CLI reports a stable invalid-data error for empty input")
+	assert_eq(_snapshot_bytes(output_dir), before_empty_import, "empty CLI import preserves the known-good snapshot byte-for-byte")
 	_request_count = 0
 	var transport_failure: Dictionary = await cli.sync({"token":"test-token", "scenes_data_source":"scene-source", "blocks_data_source":"block-source", "characters_data_source":"character-source"}, output_dir, true, Callable(self, "_service_failure"))
 	assert_false(transport_failure["ok"], "CLI returns a recorded transport failure")
@@ -294,6 +306,27 @@ func _remove_exact_tree(path: String) -> Error:
 		if remove_error != OK:
 			return remove_error
 	return DirAccess.remove_absolute(absolute)
+
+func _snapshot_bytes(path: String) -> Dictionary:
+	var result := {}
+	_capture_snapshot(path, "", result)
+	return result
+
+func _capture_snapshot(root: String, relative: String, result: Dictionary) -> void:
+	var current := root if relative.is_empty() else root.path_join(relative)
+	var directory := DirAccess.open(current)
+	if directory == null:
+		return
+	var directories := directory.get_directories()
+	directories.sort()
+	for child_dir: String in directories:
+		var child_relative := child_dir if relative.is_empty() else relative.path_join(child_dir)
+		_capture_snapshot(root, child_relative, result)
+	var files := directory.get_files()
+	files.sort()
+	for filename: String in files:
+		var file_relative := filename if relative.is_empty() else relative.path_join(filename)
+		result[file_relative] = FileAccess.get_file_as_bytes(root.path_join(file_relative))
 
 func _has_issue(issues: Array, code: String, source_url: String) -> bool:
 	for issue_value: Variant in issues:

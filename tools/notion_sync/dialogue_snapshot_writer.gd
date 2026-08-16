@@ -87,6 +87,8 @@ func replace_snapshot(output_dir: String, graphs: Dictionary, manifest: Dictiona
 	return OK
 
 func _snapshot_contents(graphs: Dictionary, manifest: Dictionary) -> Dictionary:
+	if graphs.is_empty():
+		return {"ok":false, "error":ERR_INVALID_DATA, "contents":{}}
 	if int(manifest.get("schema_version", 0)) != 1 or typeof(manifest.get("files")) != TYPE_DICTIONARY:
 		return {"ok":false, "error":ERR_INVALID_DATA, "contents":{}}
 	var contents := {}

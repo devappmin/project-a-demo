@@ -15,6 +15,8 @@ static func compile(input: Dictionary) -> Dictionary:
 	_collect_mapping_errors(scenes, issues)
 	_collect_mapping_errors(blocks, issues)
 	_collect_mapping_errors(characters, issues)
+	if scenes.is_empty():
+		issues.append(_issue("error", "empty_source", "", "", "dialogue source must contain at least one scene", {}))
 	var character_keys: Array[StringName] = []
 	var expression_catalog := {}
 	for character: Dictionary in characters:

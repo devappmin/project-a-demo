@@ -68,6 +68,10 @@ static func json(page: Dictionary, property_name: String, empty_value: Variant) 
 	var parser := JSON.new()
 	if parser.parse(text) != OK:
 		return _error("property %s contains invalid JSON" % property_name)
+	var expected_type := typeof(empty_value)
+	if typeof(parser.data) != expected_type:
+		var expected_root := "array" if expected_type == TYPE_ARRAY else "object" if expected_type == TYPE_DICTIONARY else "expected"
+		return _error("property %s JSON must have an %s root" % [property_name, expected_root])
 	return _ok(parser.data)
 
 static func _property(page: Dictionary, property_name: String, expected_type: String) -> Dictionary:

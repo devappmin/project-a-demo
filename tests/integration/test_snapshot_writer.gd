@@ -21,6 +21,7 @@ func run() -> void:
 	_test_actual_rollback_failure_preserves_backup(writer_script)
 	_test_final_backup_retention_failure_preserves_verified_recovery(writer_script)
 	_test_actual_backup_cleanup_failure_is_committed(writer_script)
+	_test_empty_payload_fails_closed(writer_script)
 	_test_unsafe_scene_names_fail_closed(writer_script)
 	_cleanup_exact_test_root()
 
@@ -143,6 +144,16 @@ func _test_actual_backup_cleanup_failure_is_committed(writer_script: Variant) ->
 	assert_eq(retry_writer.last_recovery.get("code", ""), "backup_artifact_present", "future replacement truthfully reports a generic blocking artifact")
 	assert_false(bool(retry_writer.last_recovery.get("recoverable", true)), "future process does not guess that a stale artifact is recoverable")
 	_set_tree_read_only(state["backup"], false)
+
+func _test_empty_payload_fails_closed(writer_script: Variant) -> void:
+	var state := _setup_previous("empty-payload")
+	var writer: Variant = writer_script.new()
+	var manifest := {"schema_version":1, "generated_at":"2026-08-16T00:00:00Z", "sources":[], "files":{}, "scenes":[]}
+	var result: Error = writer.replace_snapshot(state["output"], {}, manifest)
+	assert_eq(result, ERR_INVALID_DATA, "writer rejects a manifest-only empty snapshot")
+	assert_eq(_snapshot_bytes(state["output"]), state["before"], "empty writer payload preserves the current snapshot byte-for-byte")
+	assert_eq(_snapshot_bytes(state["backup"]), {}, "empty writer payload creates no backup")
+	assert_eq(_snapshot_bytes(state["temporary"]), {}, "empty writer payload creates no temporary transaction")
 
 func _test_unsafe_scene_names_fail_closed(writer_script: Variant) -> void:
 	for scene_key: String in ["manifest", "CON", "bad:name"]:
