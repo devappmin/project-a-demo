@@ -205,9 +205,9 @@ func commit_restore(plan: Dictionary) -> Error:
 	else:
 		if old_map != null:
 			old_map.queue_free()
+		await _fade.fade_in()
 		GameSession.change_mode(GameMode.Value.EXPLORATION)
 		_transition_in_progress = false
-		await _fade.fade_in()
 	return OK
 
 func has_pending_restore() -> bool:

@@ -103,7 +103,28 @@ func run() -> void:
 	assert_eq(host.get_child(0), first_map, "restore preparation does not mutate the current map")
 	assert_eq(checkpoints[0], 0, "restore preparation does not emit an autosave checkpoint")
 	plan.get("map").free()
-	assert_eq(await director.change_map(&"foundation_hall", &"start"), OK, "normal room to hall transition succeeds through change_map")
+	fade.duration = 0.06
+	var normal_transition_results: Array[Error] = []
+	call_deferred("_record_change_map_result", director, &"foundation_hall", &"start", normal_transition_results)
+	for _frame in range(30):
+		await get_tree().process_frame
+		if committed_maps.size() == 2:
+			break
+	assert_eq(committed_maps, room_and_hall_commits, "non-zero normal transition commits the candidate before fade-in finishes")
+	var locked_during_normal_fade := GameSession.current_mode == GameModeResource.Value.TRANSITION
+	assert_true(locked_during_normal_fade, "normal transition remains in TRANSITION through non-zero fade-in")
+	assert_false(GameSession.can(GameModeResource.ACTION_MOVE), "normal transition blocks movement through non-zero fade-in")
+	assert_false(GameSession.can(GameModeResource.ACTION_MENU), "normal transition blocks menu input through non-zero fade-in")
+	assert_eq(checkpoints[0], 0, "normal transition does not publish its stable checkpoint before fade-in completes")
+	if locked_during_normal_fade:
+		assert_false(GameSession.enter_menu(), "normal transition cannot enter the menu through non-zero fade-in")
+		assert_eq(await director.change_map(&"foundation_room", &"start"), ERR_BUSY, "normal transition rejects duplicate map changes through non-zero fade-in")
+	for _frame in range(30):
+		if not normal_transition_results.is_empty():
+			break
+		await get_tree().process_frame
+	assert_eq(normal_transition_results, [OK], "normal room to hall transition completes after fade-in")
+	fade.duration = 0.0
 	await get_tree().process_frame
 	var hall := host.get_child(0) as MapScene
 	assert_not_null(hall, "restore commit replaces the current map")
@@ -114,6 +135,7 @@ func run() -> void:
 		assert_eq(player.global_position, hall.get_spawn(&"start").global_position, "room to hall transition uses the exact spawn")
 	assert_false(is_instance_valid(first_map), "old map is freed only after a successful commit")
 	assert_eq(checkpoints[0], 1, "normal room to hall transition emits one stable checkpoint")
+	assert_eq(GameSession.current_mode, GameModeResource.Value.EXPLORATION, "normal transition releases exploration only after fade-in")
 	assert_eq(committed_maps, room_and_hall_commits, "map commit publishes only after successful rebinding")
 
 	assert_eq(await director.change_map(&"foundation_room", &"from_hall"), OK, "normal hall to room transition succeeds")
@@ -255,6 +277,9 @@ func _cleanup_harness(harness: Dictionary) -> void:
 	if is_instance_valid(container):
 		container.queue_free()
 		await get_tree().process_frame
+
+func _record_change_map_result(director: Node, map_id: StringName, spawn_id: StringName, results: Array[Error]) -> void:
+	results.append(await director.change_map(map_id, spawn_id))
 
 func _camera_bounds(camera: Camera2D) -> Rect2:
 	return Rect2(camera.limit_left, camera.limit_top, camera.limit_right - camera.limit_left, camera.limit_bottom - camera.limit_top)
