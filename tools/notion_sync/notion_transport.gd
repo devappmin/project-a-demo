@@ -153,12 +153,10 @@ func _validate_request_status(parsed: Dictionary) -> Dictionary:
 	var status: Dictionary = status_value
 	var status_type := String(status.get("type", ""))
 	if status_type == "complete":
-		if typeof(status.get("complete")) != TYPE_DICTIONARY:
-			return {"ok":false, "message":"Notion returned a malformed complete request_status envelope."}
 		return {"ok":true, "message":""}
 	if status_type == "incomplete":
-		var incomplete_value: Variant = status.get("incomplete")
-		if typeof(incomplete_value) != TYPE_DICTIONARY or String(incomplete_value.get("type", "")) != "query_result_limit_reached":
+		var incomplete_reason: Variant = status.get("incomplete_reason")
+		if typeof(incomplete_reason) != TYPE_STRING or String(incomplete_reason) != "query_result_limit_reached":
 			return {"ok":false, "message":"Notion returned a malformed incomplete request_status envelope."}
 		return {"ok":false, "message":"Notion query was truncated: query_result_limit_reached at the 10,000-result cap. Split the data source before syncing."}
 	return {"ok":false, "message":"Notion returned an unknown request_status type."}

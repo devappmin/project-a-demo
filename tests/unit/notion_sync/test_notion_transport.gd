@@ -98,20 +98,21 @@ func _test_paginates_recorded_pages() -> void:
 		assert_eq(_requests[0]["headers"][2], "Content-Type: application/json", "request sends JSON content")
 
 func _test_request_status_contract() -> void:
-	_recorded_responses = [_response(200, _list_response([], {"type":"complete", "complete":{}}))]
+	_recorded_responses = [_response(200, _list_response([], {"type":"complete"}))]
 	_requests = []
 	var complete_transport := NotionTransport.new("test-token", Callable(self, "_request_recording"), true)
 	var complete_result: Dictionary = await complete_transport.query_all("source-1", _valid_sorts())
 	assert_true(complete_result["ok"], "current complete request status is accepted")
 	for response_case: Dictionary in [
-		{"name":"first page incomplete", "responses":[_response(200, _list_response([{"id":"page-1"}], {"type":"incomplete", "incomplete":{"type":"query_result_limit_reached"}}))], "requests":1, "expect_limit":true},
+		{"name":"first page incomplete", "responses":[_response(200, _list_response([{"id":"page-1"}], {"type":"incomplete", "incomplete_reason":"query_result_limit_reached"}))], "requests":1, "expect_limit":true},
 		{"name":"later page incomplete", "responses":[
-			_response(200, _list_response([{"id":"page-1"}], {"type":"complete", "complete":{}}, true, "cursor-2")),
-			_response(200, _list_response([{"id":"page-2"}], {"type":"incomplete", "incomplete":{"type":"query_result_limit_reached"}}))
+			_response(200, _list_response([{"id":"page-1"}], {"type":"complete"}, true, "cursor-2")),
+			_response(200, _list_response([{"id":"page-2"}], {"type":"incomplete", "incomplete_reason":"query_result_limit_reached"}))
 		], "requests":2, "expect_limit":true},
 		{"name":"malformed status", "responses":[_response(200, _list_response([], "complete"))], "requests":1},
 		{"name":"unknown status type", "responses":[_response(200, _list_response([], {"type":"pending"}))], "requests":1},
-		{"name":"malformed incomplete reason", "responses":[_response(200, _list_response([], {"type":"incomplete", "incomplete":{}}))], "requests":1}
+		{"name":"missing incomplete reason", "responses":[_response(200, _list_response([], {"type":"incomplete"}))], "requests":1},
+		{"name":"unknown incomplete reason", "responses":[_response(200, _list_response([], {"type":"incomplete", "incomplete_reason":"other"}))], "requests":1}
 	]:
 		_recorded_responses.assign(response_case["responses"])
 		_requests = []
