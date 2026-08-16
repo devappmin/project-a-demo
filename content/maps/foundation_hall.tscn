@@ -1,10 +1,13 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://game/world/map_scene.gd" id="1_map"]
 [ext_resource type="Script" path="res://game/interaction/interaction_target.gd" id="2_target"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape_boundary"]
 size = Vector2(16, 192)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape_horizontal"]
+size = Vector2(320, 16)
 
 [sub_resource type="RectangleShape2D" id="RectangleShape_door"]
 size = Vector2(20, 32)
@@ -44,6 +47,18 @@ payload = {"map_id": &"foundation_room", "object_id": &"to_room", "spawn_id": &"
 shape = SubResource("RectangleShape_door")
 
 [node name="Boundaries" type="Node2D" parent="."]
+
+[node name="Top" type="StaticBody2D" parent="Boundaries"]
+position = Vector2(160, 8)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Boundaries/Top"]
+shape = SubResource("RectangleShape_horizontal")
+
+[node name="Bottom" type="StaticBody2D" parent="Boundaries"]
+position = Vector2(160, 184)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Boundaries/Bottom"]
+shape = SubResource("RectangleShape_horizontal")
 
 [node name="Left" type="StaticBody2D" parent="Boundaries"]
 position = Vector2(8, 96)

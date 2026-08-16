@@ -44,6 +44,14 @@ func run() -> void:
 	assert_eq(player.global_position, Vector2(160, 112), "new game places the player at the requested room spawn")
 
 	var visual_parent := player.presentation.get_parent()
+	var camera := player.get_node_or_null("Camera2D") as Camera2D
+	assert_not_null(camera, "persistent player exposes its map-bounded camera")
+	if camera == null:
+		await _cleanup_harness(harness)
+		return
+	var immediate_rollback_bounds := Rect2(12, 24, 296, 160)
+	first_map.room_bounds = immediate_rollback_bounds
+	_set_camera_bounds(camera, immediate_rollback_bounds)
 	var failed_error: Error = await director.change_map(&"not_registered", &"start")
 	assert_eq(failed_error, ERR_DOES_NOT_EXIST, "unknown maps are rejected before changing the world")
 	assert_eq(host.get_child(0), first_map, "failed validation preserves the active map")
@@ -60,12 +68,16 @@ func run() -> void:
 	assert_true(director.has_method("set_player_placement_hook"), "SceneDirector exposes an injectable player-placement failure seam")
 	assert_true(director.has_method("set_map_rebinder"), "SceneDirector exposes a rollback-capable map rebinding seam")
 	if director.has_method("set_player_placement_hook"):
-		director.call("set_player_placement_hook", func(_map: MapScene, _spawn: StringName) -> Error: return ERR_CANT_CREATE)
+		director.call("set_player_placement_hook", func(candidate_map: MapScene, candidate_spawn: StringName) -> Error:
+			var placement_error: Error = director.call("_place_player", candidate_map, candidate_spawn)
+			return ERR_CANT_CREATE if placement_error == OK else placement_error
+		)
 		assert_eq(await director.change_map(&"foundation_hall", &"start"), ERR_CANT_CREATE, "placement failure rolls back after the old map is detached")
 		assert_eq(host.get_child(0), first_map, "placement failure restores the detached map")
 		assert_eq(player.get_parent(), first_map.get_actor_root(), "placement failure restores the player body parent")
 		assert_eq(player.presentation.get_parent(), visual_parent, "placement failure restores the player visual parent")
 		assert_eq(GameSession.current_mode, GameModeResource.Value.EXPLORATION, "placement failure restores exploration mode")
+		assert_eq(_camera_bounds(camera), immediate_rollback_bounds, "placement failure restores all four camera limits to the old map bounds")
 		assert_eq(failures.size(), 3, "placement failure emits exactly one transition failure")
 		assert_eq(committed_maps.size(), 1, "placement rollback does not publish a map commit")
 		director.call("set_player_placement_hook", Callable())
@@ -76,6 +88,7 @@ func run() -> void:
 		assert_eq(player.get_parent(), first_map.get_actor_root(), "rebinding failure restores the player body parent")
 		assert_eq(player.presentation.get_parent(), visual_parent, "rebinding failure restores the player visual parent")
 		assert_eq(GameSession.current_mode, GameModeResource.Value.EXPLORATION, "rebinding failure restores exploration mode")
+		assert_eq(_camera_bounds(camera), immediate_rollback_bounds, "rebinding failure restores all four camera limits to the old map bounds")
 		assert_eq(failures.size(), 4, "rebinding failure emits exactly one transition failure")
 		assert_eq(committed_maps.size(), 1, "rebinding rollback does not publish a map commit")
 		director.call("set_map_rebinder", Callable())
@@ -128,6 +141,9 @@ func run() -> void:
 	var restore_plan: Dictionary = director.prepare_restore(&"foundation_hall", &"start")
 	restore_plan["defer_finalize"] = true
 	var map_before_deferred_restore := host.get_child(0) as MapScene
+	var deferred_rollback_bounds := Rect2(-8, 16, 352, 168)
+	map_before_deferred_restore.room_bounds = deferred_rollback_bounds
+	_set_camera_bounds(camera, deferred_rollback_bounds)
 	var position_before_deferred_restore := player.global_position
 	var facing_before_deferred_restore := player.facing
 	assert_eq(await director.commit_restore(restore_plan), OK, "deferred restore commits a candidate without destroying rollback state")
@@ -139,6 +155,7 @@ func run() -> void:
 	assert_eq(host.get_child(0), map_before_deferred_restore, "rollback reattaches the exact old map instance")
 	assert_eq(player.global_position, position_before_deferred_restore, "rollback restores the exact player position")
 	assert_eq(player.facing, facing_before_deferred_restore, "rollback restores the exact player facing")
+	assert_eq(_camera_bounds(camera), deferred_rollback_bounds, "deferred rollback restores all four camera limits to the old map bounds")
 	assert_eq(director.capture_save_context().get("spawn_id"), &"from_hall", "rollback restores the old stable spawn ID")
 	assert_false(director.has_pending_restore(), "rollback closes the pending restore transaction")
 	var finalize_plan: Dictionary = director.prepare_restore(&"foundation_hall", &"start")
@@ -238,3 +255,12 @@ func _cleanup_harness(harness: Dictionary) -> void:
 	if is_instance_valid(container):
 		container.queue_free()
 		await get_tree().process_frame
+
+func _camera_bounds(camera: Camera2D) -> Rect2:
+	return Rect2(camera.limit_left, camera.limit_top, camera.limit_right - camera.limit_left, camera.limit_bottom - camera.limit_top)
+
+func _set_camera_bounds(camera: Camera2D, bounds: Rect2) -> void:
+	camera.limit_left = floori(bounds.position.x)
+	camera.limit_top = floori(bounds.position.y)
+	camera.limit_right = ceili(bounds.end.x)
+	camera.limit_bottom = ceili(bounds.end.y)

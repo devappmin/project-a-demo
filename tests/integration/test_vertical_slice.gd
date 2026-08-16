@@ -56,8 +56,9 @@ func _drive_complete_vertical_slice() -> void:
 	assert_eq(player.presentation.get_parent(), room.get_visual_root(), "step 3 attaches PlayerVisual to the room visual root")
 	var persistent_mirror := room.get_node_or_null("VisualSort/SampleInspectable/PersistentWorldObject") as PersistentWorldObject
 	assert_not_null(persistent_mirror, "step 3 room contains the persistent mirror object")
-	if persistent_mirror != null:
-		assert_eq(persistent_mirror.object_id, &"mirror", "step 3 registers the mirror under the stable foundation_room/mirror identity")
+	if persistent_mirror == null:
+		return
+	assert_eq(persistent_mirror.object_id, &"mirror", "step 3 registers the mirror under the stable foundation_room/mirror identity")
 
 	var mirror: InteractionTarget = await harness.move_until_target(&"move_up", &"inspect", 8, false)
 	assert_not_null(mirror, "step 4 parsed movement faces the live mirror target")
@@ -68,6 +69,8 @@ func _drive_complete_vertical_slice() -> void:
 	await harness.interact_current_target()
 	assert_true(await harness.wait_until(func() -> bool: return harness.dialogue().current_graph != null), "step 4 parsed E input routes through the live interaction router")
 	assert_eq(GameSession.current_mode, GameModeResource.Value.DIALOGUE, "step 4 mirror interaction enters dialogue")
+	assert_eq(persistent_mirror.apply_persisted_state({"inspected": true}), OK, "step 4 updates the live interacted mirror through its public persistence API")
+	assert_eq(persistent_mirror.capture_persisted_state(), {"inspected": true}, "step 4 live mirror holds a non-default persisted state")
 
 	assert_true(await _advance_to_node_type("choice"), "step 5 real dialogue reaches its first choice")
 	assert_eq(harness.dialogue().current_node_id, &"default.start.choice_93440f2bd8ca", "step 5 reaches the marked important choice")
@@ -96,6 +99,7 @@ func _drive_complete_vertical_slice() -> void:
 		return
 	var important_fixture: Dictionary = important_read["data"].duplicate(true)
 	assert_eq(important_fixture["dialogue"], important_checkpoint, "step 7 important autosave stores the active checkpoint")
+	assert_eq(important_fixture["world"]["maps"]["foundation_room"]["mirror"], {"inspected": true}, "step 7 important autosave captures the live mirror's non-default persisted state")
 	assert_eq(important_fixture["meta"]["location_name"], "기초 방", "step 7 autosave metadata uses the room display name")
 
 	assert_true(await _advance_to_node_type("choice"), "step 8 chosen branch reaches its later choice")
@@ -149,6 +153,20 @@ func _drive_complete_vertical_slice() -> void:
 			hall.room_bounds,
 			"step 9 camera limits match the committed map bounds at edge spawns"
 		)
+	var top_boundary := hall.get_node_or_null("Boundaries/Top") as StaticBody2D
+	var bottom_boundary := hall.get_node_or_null("Boundaries/Bottom") as StaticBody2D
+	assert_not_null(top_boundary, "step 9 hall provides a top physics boundary")
+	assert_not_null(bottom_boundary, "step 9 hall provides a bottom physics boundary")
+	if top_boundary != null and bottom_boundary != null:
+		assert_eq(top_boundary.position, Vector2(160, 8), "step 9 top boundary lies on the exact room edge")
+		assert_eq(bottom_boundary.position, Vector2(160, 184), "step 9 bottom boundary lies on the exact room edge")
+		assert_eq(_boundary_size(top_boundary), Vector2(320, 16), "step 9 top boundary spans the exact room width")
+		assert_eq(_boundary_size(bottom_boundary), Vector2(320, 16), "step 9 bottom boundary spans the exact room width")
+	await harness.move_for(&"move_up", 120, true)
+	assert_true(hall.room_bounds.encloses(_player_collision_bounds(player)), "step 9 parsed move_up cannot move the player body beyond the hall top edge")
+	await harness.move_for(&"move_down", 160, true)
+	assert_true(hall.room_bounds.encloses(_player_collision_bounds(player)), "step 9 parsed move_down cannot move the player body beyond the hall bottom edge")
+	await harness.move_for(&"move_up", 20, true)
 	var hall_auto: Dictionary = harness.read_slot(&"auto")
 	assert_true(hall_auto.get("ok", false), "step 9 updated hall autosave is valid")
 	if hall_auto.get("ok", false):
@@ -169,7 +187,7 @@ func _drive_complete_vertical_slice() -> void:
 	if not manual_read.get("ok", false):
 		return
 	var manual_snapshot: Dictionary = manual_read["data"].duplicate(true)
-	assert_eq(manual_snapshot["world"]["maps"]["foundation_room"]["mirror"], {"inspected": false}, "step 10 transition captured foundation_room/mirror through its stable identity")
+	assert_eq(manual_snapshot["world"]["maps"]["foundation_room"]["mirror"], {"inspected": true}, "step 10 transition captured the interacted foundation_room/mirror state through its stable identity")
 
 	harness.slot_menu().back_requested.emit()
 	await harness.wait_frames(2)
@@ -178,7 +196,7 @@ func _drive_complete_vertical_slice() -> void:
 	await harness.move_for(&"move_down", 4)
 	GameSession.narrative_state.set_flag(&"mirror_seen", false)
 	GameSession.narrative_state.set_flag(&"vertical_slice_mutation", true)
-	assert_eq(GameSession.world_state.set_object(&"foundation_room", &"mirror", {"inspected": true}), OK, "step 11 mutates the mirror through the public WorldState API")
+	assert_eq(GameSession.world_state.set_object(&"foundation_room", &"mirror", {"inspected": false}), OK, "step 11 mutates the mirror through the public WorldState API")
 	assert_false(GameSession.narrative_state.get_flag(&"mirror_seen"), "step 11 mutates narrative through its public API")
 	assert_true(player.global_position != _snapshot_position(manual_snapshot), "step 11 parsed movement mutates player position")
 	assert_true(player.facing != _snapshot_facing(manual_snapshot), "step 11 parsed movement mutates player facing")
@@ -210,6 +228,10 @@ func _drive_complete_vertical_slice() -> void:
 	assert_eq(important_load, {"completed": &"auto"}, "step 13 loads the important-choice autosave through UI")
 	assert_eq(resolver.resolve_count, 0, "step 13 checkpoint resume does not re-run event resolution")
 	assert_eq(harness.current_map().map_id, &"foundation_room", "step 13 restores the checkpoint room")
+	var restored_mirror := harness.current_map().get_node_or_null("VisualSort/SampleInspectable/PersistentWorldObject") as PersistentWorldObject
+	assert_not_null(restored_mirror, "step 13 restores a live persistent mirror object")
+	if restored_mirror != null:
+		assert_eq(restored_mirror.capture_persisted_state(), {"inspected": true}, "step 13 applies the saved non-default state to the live foundation_room/mirror object")
 	assert_eq(harness.dialogue().get_checkpoint(), important_checkpoint, "step 13 resumes the exact active checkpoint")
 	assert_eq(harness.dialogue().current_node_id, &"default.inspect.line_e5b0e4bd5f23", "step 13 resumes directly at the saved next line")
 	assert_eq((harness.dialogue_view().get_node("Panel/Margin/Layout/Content/TextLabel") as Label).text, "거울 속에는 이 방과 조금 다른 방이 비친다.", "step 13 renders the exact resumed line")
@@ -364,6 +386,19 @@ func _snapshot_facing(snapshot: Dictionary) -> Vector2:
 		"right": return Vector2.RIGHT
 		"up": return Vector2.UP
 		_: return Vector2.DOWN
+
+func _player_collision_bounds(player: PlayerController) -> Rect2:
+	var collision := player.get_node_or_null("CollisionShape2D") as CollisionShape2D
+	if collision == null or not collision.shape is RectangleShape2D:
+		return Rect2()
+	var rectangle := collision.shape as RectangleShape2D
+	return Rect2(collision.global_position - rectangle.size * 0.5, rectangle.size)
+
+func _boundary_size(boundary: StaticBody2D) -> Vector2:
+	var collision := boundary.get_node_or_null("CollisionShape2D") as CollisionShape2D
+	if collision == null or not collision.shape is RectangleShape2D:
+		return Vector2.ZERO
+	return (collision.shape as RectangleShape2D).size
 
 func _adapter_connection_count(router: InteractionRouter, adapter: Node) -> int:
 	var count := 0
