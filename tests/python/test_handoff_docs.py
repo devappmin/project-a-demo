@@ -48,3 +48,7 @@ class HandoffDocumentTests(unittest.TestCase):
             for pattern in forbidden:
                 with self.subTest(path=relative, pattern=pattern):
                     self.assertIsNone(re.search(pattern, text))
+
+    def test_gitignore_ignores_python_bytecode_caches_repository_wide(self):
+        gitignore = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
+        self.assertIn("__pycache__/", gitignore.splitlines())

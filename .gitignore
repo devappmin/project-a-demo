@@ -4,3 +4,4 @@
 .superpowers/
 .worktrees/
 /tools/notion_sync/*.local.cfg
+__pycache__/
