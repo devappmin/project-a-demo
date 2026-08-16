@@ -4,7 +4,7 @@
 - 대상 프로젝트: `project-a-demo`
 - 참고 전용 프로젝트: `project-a` (deprecated, 수정 금지)
 - 엔진: Godot 4.7
-- 상태: 사용자 검토 요청
+- 상태: 사용자 승인 완료
 - 대체 대상: `docs/superpowers/plans/2026-08-09-04-world-save-vertical-slice.md`의 구현 전 설계
 
 ## 1. 목적
