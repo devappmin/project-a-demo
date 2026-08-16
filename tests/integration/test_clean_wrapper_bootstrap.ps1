@@ -6,7 +6,7 @@ $scratchRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("project-a-clean-wra
 
 try {
 	New-Item -ItemType Directory -Path $scratchRoot | Out-Null
-	Copy-Item -LiteralPath (Join-Path $fixtureRoot "project.godot") -Destination $scratchRoot
+	Copy-Item -LiteralPath (Join-Path $fixtureRoot "project.godot.fixture") -Destination (Join-Path $scratchRoot "project.godot")
 	Copy-Item -LiteralPath (Join-Path $fixtureRoot "fresh_base.gd") -Destination $scratchRoot
 	Copy-Item -LiteralPath (Join-Path $fixtureRoot "runner.gd") -Destination $scratchRoot
 
