@@ -9,7 +9,10 @@ func run() -> void:
 	_test_query_body()
 	await _test_query_requires_explicit_headless_authorization()
 	await _test_rejects_invalid_sorts_before_request()
+	await _test_timestamp_sort_matrix()
 	await _test_paginates_recorded_pages()
+	await _test_request_status_contract()
+	await _test_timeout_is_bounded_and_actionable()
 	await _test_rejects_malformed_list_envelopes_and_cursors()
 	await _test_unauthorized_response_hides_token()
 	await _test_access_and_service_errors_explain_remediation()
@@ -44,6 +47,34 @@ func _test_rejects_invalid_sorts_before_request() -> void:
 	assert_false(malformed_result["ok"], "malformed sorts are rejected")
 	assert_eq(_requests.size(), 0, "malformed sorts never invoke the request executor")
 
+func _test_timestamp_sort_matrix() -> void:
+	var valid_cases: Array[Dictionary] = [
+		{"timestamp":"created_time", "direction":"ascending"},
+		{"timestamp":"created_time", "direction":"descending"},
+		{"timestamp":"last_edited_time", "direction":"ascending"},
+		{"timestamp":"last_edited_time", "direction":"descending"}
+	]
+	for sort: Dictionary in valid_cases:
+		_recorded_responses = [_response(200, _list_response([]))]
+		_requests = []
+		var transport := NotionTransport.new("test-token", Callable(self, "_request_recording"), true)
+		var result: Dictionary = await transport.query_all("source-1", [sort])
+		assert_true(result["ok"], "timestamp sort %s %s is accepted" % [sort["timestamp"], sort["direction"]])
+		assert_eq(_requests.size(), 1, "valid timestamp sort starts exactly one request")
+	var invalid_cases: Array[Dictionary] = [
+		{"timestamp":"updated_at", "direction":"ascending"},
+		{"timestamp":"created_time", "direction":"sideways"},
+		{"timestamp":"last_edited_time", "direction":""},
+		{"property":"order", "timestamp":"created_time", "direction":"ascending"}
+	]
+	for sort: Dictionary in invalid_cases:
+		_recorded_responses = [_response(200, _list_response([]))]
+		_requests = []
+		var transport := NotionTransport.new("test-token", Callable(self, "_request_recording"), true)
+		var result: Dictionary = await transport.query_all("source-1", [sort])
+		assert_false(result["ok"], "invalid timestamp/direction sort is rejected: %s" % sort)
+		assert_eq(_requests.size(), 0, "invalid timestamp/direction sort never starts a request")
+
 func _test_paginates_recorded_pages() -> void:
 	_recorded_responses = [
 		_response(200, {"object":"list", "results":[{"id":"page-1"}], "next_cursor":"cursor-2", "has_more":true, "type":"page_or_data_source", "page_or_data_source":{}}),
@@ -65,6 +96,54 @@ func _test_paginates_recorded_pages() -> void:
 		assert_true(String(_requests[0]["headers"][0]).contains("Bearer test-token"), "request uses bearer authentication")
 		assert_eq(_requests[0]["headers"][1], "Notion-Version: 2026-03-11", "request uses the pinned Notion API version")
 		assert_eq(_requests[0]["headers"][2], "Content-Type: application/json", "request sends JSON content")
+
+func _test_request_status_contract() -> void:
+	_recorded_responses = [_response(200, _list_response([], {"type":"complete", "complete":{}}))]
+	_requests = []
+	var complete_transport := NotionTransport.new("test-token", Callable(self, "_request_recording"), true)
+	var complete_result: Dictionary = await complete_transport.query_all("source-1", _valid_sorts())
+	assert_true(complete_result["ok"], "current complete request status is accepted")
+	for response_case: Dictionary in [
+		{"name":"first page incomplete", "responses":[_response(200, _list_response([{"id":"page-1"}], {"type":"incomplete", "incomplete":{"type":"query_result_limit_reached"}}))], "requests":1, "expect_limit":true},
+		{"name":"later page incomplete", "responses":[
+			_response(200, _list_response([{"id":"page-1"}], {"type":"complete", "complete":{}}, true, "cursor-2")),
+			_response(200, _list_response([{"id":"page-2"}], {"type":"incomplete", "incomplete":{"type":"query_result_limit_reached"}}))
+		], "requests":2, "expect_limit":true},
+		{"name":"malformed status", "responses":[_response(200, _list_response([], "complete"))], "requests":1},
+		{"name":"unknown status type", "responses":[_response(200, _list_response([], {"type":"pending"}))], "requests":1},
+		{"name":"malformed incomplete reason", "responses":[_response(200, _list_response([], {"type":"incomplete", "incomplete":{}}))], "requests":1}
+	]:
+		_recorded_responses.assign(response_case["responses"])
+		_requests = []
+		var transport := NotionTransport.new("test-token", Callable(self, "_request_recording"), true)
+		var result: Dictionary = await transport.query_all("source-1", _valid_sorts())
+		assert_false(result["ok"], "%s is rejected" % response_case["name"])
+		assert_eq(_requests.size(), response_case["requests"], "%s stops on the offending page" % response_case["name"])
+		if bool(response_case.get("expect_limit", false)):
+			assert_true(String(result["message"]).contains("query_result_limit_reached"), "%s names the Notion truncation reason" % response_case["name"])
+			assert_true(String(result["message"]).contains("10,000"), "%s explains the current result cap" % response_case["name"])
+
+func _test_timeout_is_bounded_and_actionable() -> void:
+	var transport_script: Script = NotionTransport
+	assert_true(_script_has_method(transport_script, "configure_http_request"), "transport exposes HTTP request timeout configuration")
+	if not _script_has_method(transport_script, "configure_http_request"):
+		return
+	var request := HTTPRequest.new()
+	transport_script.call("configure_http_request", request)
+	assert_true(request.timeout > 0.0, "production HTTP request has a finite timeout")
+	request.free()
+	_recorded_responses = [{"request_result":HTTPRequest.RESULT_TIMEOUT, "status_code":0, "body":""}]
+	_requests = []
+	var timeout_transport := NotionTransport.new("test-token", Callable(self, "_request_recording"), true)
+	var timeout_result: Dictionary = await timeout_transport.query_all("source-1", _valid_sorts())
+	assert_false(timeout_result["ok"], "timeout fails the query")
+	assert_true(String(timeout_result["message"]).contains("timed out"), "timeout is distinguished from a generic network failure")
+	_recorded_responses = [{"request_result":HTTPRequest.RESULT_CONNECTION_ERROR, "status_code":0, "body":""}]
+	_requests = []
+	var failure_transport := NotionTransport.new("test-token", Callable(self, "_request_recording"), true)
+	var failure_result: Dictionary = await failure_transport.query_all("source-1", _valid_sorts())
+	assert_false(failure_result["ok"], "generic network failure fails the query")
+	assert_false(String(failure_result["message"]).contains("timed out"), "generic network failure is not mislabeled as timeout")
 
 func _test_rejects_malformed_list_envelopes_and_cursors() -> void:
 	for response_case: Dictionary in [
@@ -129,5 +208,17 @@ func _request_recording(url: String, headers: PackedStringArray, body: String) -
 func _response(status_code: int, body: Dictionary) -> Dictionary:
 	return {"status_code":status_code, "body":JSON.stringify(body)}
 
+func _list_response(results: Array, request_status: Variant = null, has_more: bool = false, next_cursor: Variant = null) -> Dictionary:
+	var response := {"object":"list", "results":results, "next_cursor":next_cursor, "has_more":has_more, "type":"page_or_data_source", "page_or_data_source":{}}
+	if request_status != null:
+		response["request_status"] = request_status
+	return response
+
 func _valid_sorts() -> Array[Dictionary]:
 	return [{"property":"order", "direction":"ascending"}]
+
+func _script_has_method(script: Script, method_name: String) -> bool:
+	for method: Dictionary in script.get_script_method_list():
+		if String(method.get("name", "")) == method_name:
+			return true
+	return false

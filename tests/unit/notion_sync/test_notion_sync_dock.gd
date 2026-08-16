@@ -1,12 +1,15 @@
 extends "res://tests/support/test_case.gd"
 
 const DOCK_SCENE_PATH := "res://tools/notion_sync/notion_sync_dock.tscn"
+const NotionSyncCli = preload("res://tools/notion_sync/notion_sync_cli.gd")
 
 var _dock: Control
 var _sync_calls: Array[Dictionary] = []
 var _opened_urls: Array[String] = []
 var _scan_count := 0
 var _saw_busy_during_call := false
+var _delayed_runner_count := 0
+var _release_delayed_runner := false
 
 func run() -> void:
 	assert_true(ResourceLoader.exists(DOCK_SCENE_PATH, "PackedScene"), "Notion sync dock scene exists")
@@ -24,6 +27,8 @@ func run() -> void:
 	_test_source_url_activation()
 	await _test_dry_run_does_not_rescan()
 	await _test_missing_secret_fails_closed()
+	await _test_timeout_failure_restores_idle_state()
+	await _test_delayed_runner_rejects_reentry()
 	_dock.queue_free()
 	await get_tree().process_frame
 
@@ -76,6 +81,36 @@ func _test_missing_secret_fails_closed() -> void:
 	assert_false(_dock.is_busy(), "missing configuration restores the dock to idle")
 	assert_eq(_scan_count, 0, "failed configuration never scans generated sources")
 
+func _test_timeout_failure_restores_idle_state() -> void:
+	_reset_observations()
+	_dock.configure(Callable(self, "_valid_config"), Callable(self, "_timeout_sync"), Callable(self, "_record_scan"), Callable(self, "_record_open"))
+	var result: Dictionary = await _dock.start_sync(false)
+	assert_false(result["ok"], "timeout result fails the dock sync")
+	assert_true((_dock.get_node("StatusLabel") as Label).text.contains("timed out"), "dock displays the actionable timeout diagnostic")
+	assert_false(_dock.is_busy(), "timeout restores the dock to idle")
+	assert_false((_dock.get_node("SyncButton") as Button).disabled, "timeout restores the sync button")
+	assert_false((_dock.get_node("DryRunButton") as Button).disabled, "timeout restores the dry-run button")
+	assert_eq(_scan_count, 0, "timeout never scans generated sources")
+
+func _test_delayed_runner_rejects_reentry() -> void:
+	_reset_observations()
+	_delayed_runner_count = 0
+	_release_delayed_runner = false
+	_dock.configure(Callable(self, "_valid_config"), Callable(self, "_delayed_sync"), Callable(self, "_record_scan"), Callable(self, "_record_open"))
+	_dock.start_sync(false)
+	await get_tree().process_frame
+	assert_true(_dock.is_busy(), "first delayed request remains busy while pending")
+	var second: Dictionary = await _dock.start_sync(true)
+	assert_false(second["ok"], "second request is rejected while the first is pending")
+	assert_true(String(second["message"]).contains("already active"), "reentry diagnostic explains the active request")
+	assert_eq(_delayed_runner_count, 1, "reentry never starts a second runner")
+	_release_delayed_runner = true
+	await get_tree().process_frame
+	await get_tree().process_frame
+	assert_false(_dock.is_busy(), "first delayed request restores idle state after completion")
+	assert_false((_dock.get_node("SyncButton") as Button).disabled, "delayed completion restores the sync button")
+	assert_false((_dock.get_node("DryRunButton") as Button).disabled, "delayed completion restores the dry-run button")
+
 func _test_source_url_activation() -> void:
 	_opened_urls.clear()
 	var issues := _dock.get_node("Issues") as ItemList
@@ -117,6 +152,19 @@ func _successful_sync(config: Dictionary, _output_dir: String, dry_run: bool) ->
 		"manifest":{"files":{"foundation_inspect.json":"abc"}, "scenes":["foundation.inspect"]},
 		"issues":[{"severity":"warning", "code":"unknown_expression", "message":"test-secret is not allowed", "source_url":"https://notion.so/source-row"}]
 	}
+
+func _timeout_sync(config: Dictionary, output_dir: String, dry_run: bool) -> Dictionary:
+	await get_tree().process_frame
+	return await NotionSyncCli.sync(config, output_dir, dry_run, Callable(self, "_timeout_response"))
+
+func _timeout_response(_url: String, _headers: PackedStringArray, _body: String) -> Dictionary:
+	return {"request_result":HTTPRequest.RESULT_TIMEOUT, "status_code":0, "body":""}
+
+func _delayed_sync(config: Dictionary, output_dir: String, dry_run: bool) -> Dictionary:
+	_delayed_runner_count += 1
+	while not _release_delayed_runner:
+		await get_tree().process_frame
+	return _successful_sync(config, output_dir, dry_run)
 
 func _record_scan() -> void:
 	_scan_count += 1

@@ -4,6 +4,7 @@ class_name NotionTransport
 
 const API_VERSION := "2026-03-11"
 const API_ROOT := "https://api.notion.com/v1/data_sources/"
+const REQUEST_TIMEOUT_SECONDS := 20.0
 const SyncConfig = preload("res://tools/notion_sync/notion_sync_config.gd")
 
 var _token: String
@@ -20,6 +21,9 @@ static func build_query_body(sorts: Array[Dictionary], cursor: String = "") -> D
 	if not cursor.is_empty():
 		body["start_cursor"] = cursor
 	return body
+
+static func configure_http_request(request: HTTPRequest) -> void:
+	request.timeout = REQUEST_TIMEOUT_SECONDS
 
 func query_all(data_source_id: String, sorts: Array[Dictionary]) -> Dictionary:
 	if not SyncConfig.is_available_for(Engine.is_editor_hint(), OS.has_feature("editor"), _is_headless(), _allow_headless_sync):
@@ -65,6 +69,8 @@ func _validate_sorts(sorts: Array[Dictionary]) -> Dictionary:
 		var direction := String(sort.get("direction", "")).strip_edges()
 		if (property.is_empty() and timestamp.is_empty()) or (not property.is_empty() and not timestamp.is_empty()):
 			return {"ok": false, "message": "Each Notion sort must specify exactly one property or timestamp."}
+		if not timestamp.is_empty() and timestamp not in ["created_time", "last_edited_time"]:
+			return {"ok": false, "message": "Notion timestamp sorts must use created_time or last_edited_time."}
 		if direction != "ascending" and direction != "descending":
 			return {"ok": false, "message": "Each Notion sort must use ascending or descending direction."}
 	return {"ok": true, "message": ""}
@@ -85,6 +91,7 @@ func _send_http_request(url: String, headers: PackedStringArray, body: String) -
 	if tree == null:
 		return {"ok": false, "status_code": 0, "message": "Notion sync requires an active editor or headless scene tree."}
 	var request := HTTPRequest.new()
+	configure_http_request(request)
 	tree.root.add_child(request)
 	var request_error := request.request(url, headers, HTTPClient.METHOD_POST, body)
 	if request_error != OK:
@@ -92,12 +99,16 @@ func _send_http_request(url: String, headers: PackedStringArray, body: String) -
 		return {"ok": false, "status_code": 0, "message": "Unable to start the Notion request. Check network access and retry."}
 	var completed: Array = await request.request_completed
 	request.queue_free()
-	if int(completed[0]) != HTTPRequest.RESULT_SUCCESS:
-		return {"ok": false, "status_code": int(completed[1]), "message": "Unable to reach Notion. Check network access and retry."}
-	return _normalize_response({"status_code": int(completed[1]), "body": PackedByteArray(completed[3]).get_string_from_utf8()})
+	return _normalize_response({"request_result":int(completed[0]), "status_code":int(completed[1]), "body":PackedByteArray(completed[3]).get_string_from_utf8()})
 
 func _normalize_response(response: Dictionary) -> Dictionary:
 	var status_code := int(response.get("status_code", 0))
+	if response.has("request_result"):
+		var request_result := int(response["request_result"])
+		if request_result == HTTPRequest.RESULT_TIMEOUT:
+			return {"ok": false, "status_code": status_code, "message": "Notion request timed out. Check network access and retry."}
+		if request_result != HTTPRequest.RESULT_SUCCESS:
+			return {"ok": false, "status_code": status_code, "message": "Unable to reach Notion. Check network access and retry."}
 	if status_code == 401:
 		return {"ok": false, "status_code": status_code, "message": "Notion rejected the credentials (401). Verify PROJECT_A_NOTION_TOKEN and the integration."}
 	if status_code == 403:
@@ -125,10 +136,32 @@ func _parse_page_response(status_code: int, body: String) -> Dictionary:
 		return _failure(status_code, "Notion returned a malformed data-source query list envelope. Verify the API response and retry.")
 	if typeof(parsed.get("results")) != TYPE_ARRAY or typeof(parsed.get("has_more")) != TYPE_BOOL:
 		return _failure(status_code, "Notion returned malformed JSON for a data source query.")
+	var status_result := _validate_request_status(parsed)
+	if not status_result["ok"]:
+		return _failure(status_code, String(status_result["message"]))
 	var next_cursor: Variant = parsed.get("next_cursor")
 	if bool(parsed["has_more"]) and typeof(next_cursor) != TYPE_STRING:
 		return _failure(status_code, "Notion returned malformed JSON with no next cursor for an additional page.")
 	return {"ok": true, "results": parsed["results"], "has_more": bool(parsed["has_more"]), "next_cursor": next_cursor}
+
+func _validate_request_status(parsed: Dictionary) -> Dictionary:
+	if not parsed.has("request_status"):
+		return {"ok":true, "message":""}
+	var status_value: Variant = parsed["request_status"]
+	if typeof(status_value) != TYPE_DICTIONARY:
+		return {"ok":false, "message":"Notion returned a malformed request_status envelope."}
+	var status: Dictionary = status_value
+	var status_type := String(status.get("type", ""))
+	if status_type == "complete":
+		if typeof(status.get("complete")) != TYPE_DICTIONARY:
+			return {"ok":false, "message":"Notion returned a malformed complete request_status envelope."}
+		return {"ok":true, "message":""}
+	if status_type == "incomplete":
+		var incomplete_value: Variant = status.get("incomplete")
+		if typeof(incomplete_value) != TYPE_DICTIONARY or String(incomplete_value.get("type", "")) != "query_result_limit_reached":
+			return {"ok":false, "message":"Notion returned a malformed incomplete request_status envelope."}
+		return {"ok":false, "message":"Notion query was truncated: query_result_limit_reached at the 10,000-result cap. Split the data source before syncing."}
+	return {"ok":false, "message":"Notion returned an unknown request_status type."}
 
 func _failure(status_code: int, message: String) -> Dictionary:
 	return {"ok": false, "pages": [], "status_code": status_code, "message": message}
