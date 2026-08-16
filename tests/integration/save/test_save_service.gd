@@ -3,6 +3,8 @@ extends "res://tests/support/test_case.gd"
 const GameModeResource = preload("res://app/session/game_mode.gd")
 const SaveDataResource = preload("res://app/save/save_data.gd")
 const SaveRepositoryResource = preload("res://app/save/save_repository.gd")
+const SceneDirectorResource = preload("res://app/scene_flow/scene_director.gd")
+const ScreenFadeResource = preload("res://ui/transitions/screen_fade.gd")
 
 class FakePlayer:
 	extends Node2D
@@ -77,6 +79,8 @@ class FakeDialogue:
 	var checkpoint := {"active": false}
 	var validation_error: Error = OK
 	var resume_error: Error = OK
+	var refresh_error: Error = OK
+	var refresh_errors: Array[Error] = []
 	var resumed: Array[Dictionary] = []
 
 	func get_checkpoint() -> Dictionary:
@@ -91,6 +95,11 @@ class FakeDialogue:
 		resumed.append(checkpoint_value.duplicate(true))
 		GameSession.change_mode(GameModeResource.Value.DIALOGUE)
 		return OK
+
+	func refresh_session_state() -> Error:
+		if not refresh_errors.is_empty():
+			return refresh_errors.pop_front()
+		return refresh_error if refresh_error != OK else super.refresh_session_state()
 
 class FakeRepository:
 	extends SaveRepositoryResource
@@ -124,6 +133,9 @@ func run() -> void:
 	await _test_manual_save_capture_and_mode_gate()
 	await _test_autosave_coalescing_and_signals()
 	await _test_restore_preflight_success_and_rollback()
+	await _test_real_restore_lock_and_checkpoint_boundaries()
+	await _test_real_post_mutation_failures_restore_context()
+	await _test_real_title_empty_world_rollback()
 	_test_slot_metadata_is_ordered_and_copied()
 
 func _test_manual_save_capture_and_mode_gate() -> void:
@@ -178,6 +190,12 @@ func _test_manual_save_capture_and_mode_gate() -> void:
 	director.player.global_position = Vector2(INF, 0.0)
 	assert_eq(service.call("save_manual_slot", &"slot_4"), ERR_INVALID_DATA, "non-finite player state fails closed")
 	assert_eq(repository.writes.size(), writes_before_invalid, "invalid capture fails before repository write")
+	director.player.global_position = Vector2(12.0, 34.0)
+	for invalid_facing: Vector2 in [Vector2.ZERO, Vector2.ONE, Vector2(0.5, 0.0), Vector2(INF, 0.0), Vector2(NAN, 0.0)]:
+		var writes_before_facing := repository.writes.size()
+		director.player.facing = invalid_facing
+		assert_eq(service.call("save_manual_slot", &"slot_4"), ERR_INVALID_DATA, "non-cardinal facing %s fails closed" % invalid_facing)
+		assert_eq(repository.writes.size(), writes_before_facing, "invalid facing %s is rejected before repository write" % invalid_facing)
 	await _cleanup_harness(harness)
 
 func _test_autosave_coalescing_and_signals() -> void:
@@ -286,20 +304,165 @@ func _test_restore_preflight_success_and_rollback() -> void:
 	assert_eq(await service.call("load_slot", &"slot_1"), OK, "inactive dialogue checkpoint loads successfully")
 	assert_eq(GameSession.current_mode, GameModeResource.Value.EXPLORATION, "inactive checkpoint returns to exploration")
 	assert_eq(dialogue.resumed.size(), 1, "inactive checkpoint does not invoke dialogue resume")
-	GameSession.change_mode(GameModeResource.Value.EXPLORATION)
-	director.commit_error = ERR_CANT_CREATE
-	var before_commit_failure := _complete_current_state(director)
-	assert_eq(await service.call("load_slot", &"slot_1"), ERR_CANT_CREATE, "unexpected candidate commit failure is reported")
-	assert_eq(_complete_current_state(director), before_commit_failure, "commit failure restores the old map and complete session")
 	await _cleanup_harness(harness)
-	var title_harness := await _make_harness()
+
+func _test_real_restore_lock_and_checkpoint_boundaries() -> void:
+	var harness := await _make_real_restore_harness(true)
+	var service: Node = harness.service
+	var director: SceneDirectorService = harness.director
+	var dialogue: DialogueService = harness.dialogue
+	var repository: FakeRepository = harness.repository
+	var fade: ScreenFade = harness.fade
+	fade.duration = 0.04
+	assert_true(GameSession.enter_menu(), "real lock test loads from an exploration-origin menu")
+	var line_checkpoint := {
+		"active": true,
+		"bundle_key": "foundation.inspect",
+		"trigger_key": "mirror.inspect",
+		"node_id": "default.inspect.line_e5b0e4bd5f23",
+		"boundary": "line",
+	}
+	repository.results[&"slot_1"] = {"ok": true, "error": OK, "data": _restore_snapshot("slot_1", &"foundation_hall", &"start", line_checkpoint), "recovered": false, "diagnostic": {}}
+	var completed := [false]
+	var failed := [false]
+	var lines: Array[Dictionary] = []
+	service.load_completed.connect(func(_slot_id: StringName) -> void: completed[0] = true, CONNECT_ONE_SHOT)
+	service.load_failed.connect(func(_slot_id: StringName, _context: Dictionary) -> void: failed[0] = true, CONNECT_ONE_SHOT)
+	dialogue.line_requested.connect(func(character: StringName, expression: StringName, text: String) -> void:
+		lines.append({"character": character, "expression": expression, "text": text})
+	)
+	service.call_deferred("load_slot", &"slot_1")
+	var locked_frames := 0
+	for _frame in range(120):
+		await get_tree().process_frame
+		if completed[0] or failed[0]:
+			break
+		if service.is_busy():
+			locked_frames += 1
+			assert_eq(GameSession.current_mode, GameModeResource.Value.TRANSITION, "every observable load frame remains transition-locked")
+			assert_false(GameSession.can(GameModeResource.ACTION_MOVE), "movement stays locked before load completion")
+			assert_false(GameSession.can(GameModeResource.ACTION_DIALOGUE_ADVANCE), "dialogue advance stays locked before load completion")
+			if GameSession.can(GameModeResource.ACTION_MOVE):
+				director.player.global_position += Vector2(5.0, 0.0)
+			if GameSession.can(GameModeResource.ACTION_DIALOGUE_ADVANCE):
+				dialogue.advance()
+	assert_true(completed[0] and not failed[0], "non-zero-fade restore completes successfully")
+	assert_true(locked_frames > 0, "non-zero fade exposes at least one locked frame")
+	assert_eq(director.player.global_position, Vector2(80.0, 90.0), "restored player position cannot change before load completion")
+	assert_eq(dialogue.get_checkpoint(), line_checkpoint, "exact active line checkpoint cannot advance before load completion")
+	assert_eq(lines, [{"character": &"retti", "expression": &"uneasy", "text": "거울 속에는 이 방과 조금 다른 방이 비친다."}], "line restore publishes the exact saved boundary once")
+	assert_eq(GameSession.current_mode, GameModeResource.Value.DIALOGUE, "active line restore unlocks into dialogue only at completion")
+	dialogue.abort_dialogue(&"test_cleanup")
+	assert_true(GameSession.enter_menu(), "choice restore re-enters from exploration menu")
+	var choice_checkpoint := {
+		"active": true,
+		"bundle_key": "foundation.inspect",
+		"trigger_key": "mirror.inspect",
+		"node_id": "default.start.choice_93440f2bd8ca",
+		"boundary": "choice",
+	}
+	repository.results[&"slot_2"] = {"ok": true, "error": OK, "data": _restore_snapshot("slot_2", &"foundation_room", &"start", choice_checkpoint), "recovered": false, "diagnostic": {}}
+	var choices: Array[Array] = []
+	dialogue.choices_requested.connect(func(items: Array[Dictionary]) -> void: choices.append(items.duplicate(true)))
+	assert_eq(await service.call("load_slot", &"slot_2"), OK, "exact choice-boundary checkpoint restores")
+	assert_eq(dialogue.get_checkpoint(), choice_checkpoint, "choice restore retains the exact active checkpoint payload")
+	assert_eq(choices.size(), 1, "choice restore publishes one exact choice boundary")
+	if not choices.is_empty():
+		assert_eq(choices[0].map(func(item: Dictionary) -> String: return String(item.get("text", ""))), ["거울을 자세히 본다", "한 걸음 물러난다"], "choice restore publishes saved-node choices without resolver selection")
+	dialogue.abort_dialogue(&"test_cleanup")
+	await _cleanup_harness(harness)
+
+func _test_real_post_mutation_failures_restore_context() -> void:
+	var harness := await _make_real_restore_harness(true)
+	var service: Node = harness.service
+	var director: SceneDirectorService = harness.director
+	var repository: FakeRepository = harness.repository
+	assert_true(service.has_method("set_restore_apply_hook"), "SaveService exposes a post-mutation apply failure seam")
+	assert_true(director.has_method("set_restore_finalize_hook"), "SceneDirector exposes a post-mutation finalize failure seam")
+	if not service.has_method("set_restore_apply_hook") or not director.has_method("set_restore_finalize_hook"):
+		await _cleanup_harness(harness)
+		return
+	director.player.global_position = Vector2(11.0, 22.0)
+	director.player.facing = Vector2.LEFT
+	GameSession.narrative_state.set_flag(&"preserved", true)
+	GameSession.play_time_seconds = 12.0
+	assert_true(GameSession.enter_menu(), "post-mutation failure starts from an exploration-origin menu")
+	var old_map: Node = harness.host.get_child(0)
+	var old_state := _real_current_state(harness)
+	repository.results[&"slot_3"] = {"ok": true, "error": OK, "data": _restore_snapshot("slot_3", &"foundation_hall", &"start", {"active": false}), "recovered": false, "diagnostic": {}}
+	var observed_apply_mutation := [false]
+	service.set_restore_apply_hook(func() -> Error:
+		observed_apply_mutation[0] = GameSession.narrative_state.get_flag(&"loaded") and director.player.global_position == Vector2(80.0, 90.0) and harness.host.get_child(0) != old_map
+		return ERR_CANT_CREATE
+	)
+	assert_eq(await service.call("load_slot", &"slot_3"), ERR_CANT_CREATE, "failure after real session/map/player mutation is reported")
+	assert_true(observed_apply_mutation[0], "apply failure seam runs only after real restore mutation")
+	assert_eq(_real_current_state(harness), old_state, "post-apply failure restores exact map/session/player/mode context")
+	assert_true(GameSession.is_menu_from_exploration(), "post-apply failure restores exploration-origin menu provenance")
+	service.set_restore_apply_hook(Callable())
+	var observed_finalize_mutation := [false]
+	director.set_restore_finalize_hook(func() -> Error:
+		observed_finalize_mutation[0] = GameSession.narrative_state.get_flag(&"loaded") and director.player.global_position == Vector2(80.0, 90.0) and harness.host.get_child(0) != old_map
+		return ERR_CANT_CREATE
+	)
+	assert_eq(await service.call("load_slot", &"slot_3"), ERR_CANT_CREATE, "failure after real finalize-stage mutation is reported")
+	assert_true(observed_finalize_mutation[0], "finalize failure seam observes the committed restored state")
+	assert_eq(_real_current_state(harness), old_state, "finalize failure rolls back exact map/session/player/mode context")
+	assert_true(GameSession.is_menu_from_exploration(), "finalize failure restores exploration-origin menu provenance")
+	director.set_restore_finalize_hook(Callable())
+	var rebind_calls := [0]
+	director.set_map_rebinder(func(_player: PlayerController) -> Error:
+		rebind_calls[0] += 1
+		return OK if rebind_calls[0] == 1 else ERR_CANT_CONNECT
+	)
+	service.set_restore_apply_hook(func() -> Error: return ERR_CANT_CREATE)
+	var failure_contexts: Array[Dictionary] = []
+	service.load_failed.connect(func(_slot_id: StringName, context: Dictionary) -> void: failure_contexts.append(context.duplicate(true)))
+	assert_eq(await service.call("load_slot", &"slot_3"), ERR_CANT_CONNECT, "rollback error supersedes and propagates the triggering apply error")
+	assert_false(failure_contexts.is_empty(), "rollback failure emits structured load failure context")
+	if not failure_contexts.is_empty():
+		assert_eq(failure_contexts[-1].get("primary_error"), ERR_CANT_CREATE, "structured failure retains the primary apply error")
+		assert_eq(failure_contexts[-1].get("rollback", {}).get("stage"), &"map_rebind", "structured failure identifies rollback stage")
+		assert_eq(failure_contexts[-1].get("rollback", {}).get("error"), ERR_CANT_CONNECT, "structured failure contains exact rollback error")
+	director.set_map_rebinder(Callable())
+	service.set_restore_apply_hook(Callable())
+	var failing_dialogue := FakeDialogue.new()
+	failing_dialogue.refresh_errors = [OK, ERR_CANT_CONNECT]
+	harness.container.add_child(failing_dialogue)
+	assert_eq(service.configure(director, failing_dialogue), OK, "rollback refresh test injects only the dialogue refresh boundary")
+	service.set_restore_apply_hook(func() -> Error: return ERR_CANT_CREATE)
+	failure_contexts.clear()
+	assert_eq(await service.call("load_slot", &"slot_3"), ERR_CANT_CONNECT, "rollback dialogue refresh error is propagated")
+	assert_false(failure_contexts.is_empty(), "rollback refresh failure emits structured context")
+	if not failure_contexts.is_empty():
+		assert_eq(failure_contexts[-1].get("primary_error"), ERR_CANT_CREATE, "refresh failure context retains the triggering apply error")
+		assert_eq(failure_contexts[-1].get("rollback", {}).get("stage"), &"dialogue_refresh", "refresh failure context identifies dialogue refresh rollback stage")
+		assert_eq(failure_contexts[-1].get("rollback", {}).get("error"), ERR_CANT_CONNECT, "refresh failure context contains exact refresh error")
+	service.set_restore_apply_hook(Callable())
+	await _cleanup_harness(harness)
+
+func _test_real_title_empty_world_rollback() -> void:
+	var harness := await _make_real_restore_harness(false)
+	var service: Node = harness.service
+	var director: SceneDirectorService = harness.director
+	var repository: FakeRepository = harness.repository
+	assert_true(director.has_method("set_restore_finalize_hook"), "title rollback uses the real finalize failure seam")
+	if not director.has_method("set_restore_finalize_hook"):
+		await _cleanup_harness(harness)
+		return
 	GameSession.reset_new_game()
 	GameSession.change_mode(GameModeResource.Value.MENU)
-	var title_before := _complete_current_state(title_harness.director)
-	assert_eq(await title_harness.service.call("load_slot", &"slot_5"), ERR_FILE_NOT_FOUND, "title missing-slot load fails closed")
-	assert_eq(_complete_current_state(title_harness.director), title_before, "title load failure stays in menu with its unchanged empty-world state")
-	assert_false(title_harness.director.committed, "title load failure never commits a map")
-	await _cleanup_harness(title_harness)
+	var title_state := _real_current_state(harness)
+	repository.results[&"slot_4"] = {"ok": true, "error": OK, "data": _restore_snapshot("slot_4", &"foundation_hall", &"start", {"active": false}), "recovered": false, "diagnostic": {}}
+	director.set_restore_finalize_hook(func() -> Error: return ERR_CANT_CREATE)
+	assert_eq(await service.call("load_slot", &"slot_4"), ERR_CANT_CREATE, "title post-commit finalize failure is reported")
+	await get_tree().process_frame
+	assert_eq(_real_current_state(harness), title_state, "title post-commit failure restores exact empty-world state")
+	assert_eq(harness.host.get_child_count(), 0, "real title rollback leaves WorldHost empty")
+	assert_false(is_instance_valid(director.player), "real title rollback retains no candidate player")
+	assert_eq(GameSession.current_mode, GameModeResource.Value.MENU, "real title rollback remains in title menu")
+	assert_false(GameSession.is_menu_from_exploration(), "real title rollback does not invent gameplay menu provenance")
+	await _cleanup_harness(harness)
 
 func _test_slot_metadata_is_ordered_and_copied() -> void:
 	var repository := FakeRepository.new()
@@ -332,6 +495,34 @@ func _make_harness() -> Dictionary:
 	assert_eq(service.call("configure", director, dialogue), OK, "SaveService configures injected director and dialogue dependencies")
 	return {"container": container, "service": service, "director": director, "dialogue": dialogue, "repository": repository}
 
+func _make_real_restore_harness(start_game: bool) -> Dictionary:
+	var container := Node.new()
+	get_tree().root.add_child(container)
+	var host := Node2D.new()
+	container.add_child(host)
+	var fade := ScreenFadeResource.new()
+	var curtain := ColorRect.new()
+	curtain.name = "Curtain"
+	fade.add_child(curtain)
+	fade.duration = 0.0
+	container.add_child(fade)
+	var director := SceneDirectorResource.new()
+	container.add_child(director)
+	assert_eq(director.configure(host, fade), OK, "real restore director configures")
+	GameSession.reset_new_game()
+	GameSession.change_mode(GameModeResource.Value.MENU)
+	if start_game:
+		assert_eq(await director.start_new_game(&"foundation_room", &"start"), OK, "real restore harness starts an initial map")
+	var dialogue := DialogueService.new()
+	dialogue.game_session = GameSession
+	container.add_child(dialogue)
+	var repository := FakeRepository.new()
+	var service: Node = _save_service_script.new()
+	container.add_child(service)
+	service.set("repository", repository)
+	assert_eq(service.call("configure", director, dialogue), OK, "real restore harness configures SaveService")
+	return {"container": container, "host": host, "fade": fade, "director": director, "dialogue": dialogue, "repository": repository, "service": service}
+
 func _cleanup_harness(harness: Dictionary) -> void:
 	var container: Node = harness.container
 	container.queue_free()
@@ -346,6 +537,30 @@ func _snapshot(slot_id: String, active_dialogue: bool) -> Dictionary:
 		"world": {"maps": {"foundation_room": {"mirror": {"inspected": true}}}},
 		"dialogue": {"active": active_dialogue, "bundle_key": "foundation.inspect" if active_dialogue else "", "trigger_key": "mirror.inspect" if active_dialogue else "", "node_id": "mirror_after_choice" if active_dialogue else "", "boundary": "line" if active_dialogue else ""},
 	})
+
+func _restore_snapshot(slot_id: String, map_id: StringName, spawn_id: StringName, checkpoint: Dictionary) -> Dictionary:
+	var dialogue_checkpoint := checkpoint.duplicate(true)
+	if dialogue_checkpoint.get("active", false) != true:
+		dialogue_checkpoint = {"active": false, "bundle_key": "", "trigger_key": "", "node_id": "", "boundary": ""}
+	return SaveDataResource.with_checksum({
+		"schema_version": 1,
+		"meta": {"slot_id": slot_id, "saved_at": "2026-08-16T12:34:56Z", "play_time_seconds": 77.0, "location_name": "기초 홀" if map_id == &"foundation_hall" else "기초 방"},
+		"player": {"map_id": String(map_id), "spawn_id": String(spawn_id), "position": {"x": 80.0, "y": 90.0}, "facing": "right"},
+		"narrative": {"flags": {"loaded": true}, "stats": {}, "inventory": {}, "quests": {}, "collectibles": {}},
+		"world": {"maps": {"foundation_room": {"mirror": {"inspected": true}}}},
+		"dialogue": dialogue_checkpoint,
+	})
+
+func _real_current_state(harness: Dictionary) -> Dictionary:
+	var director: SceneDirectorService = harness.director
+	return {
+		"session": GameSession.snapshot_session(),
+		"mode_context": GameSession.snapshot_mode_context(),
+		"map": harness.host.get_child(0) if harness.host.get_child_count() > 0 else null,
+		"player_valid": is_instance_valid(director.player),
+		"position": director.player.global_position if is_instance_valid(director.player) else Vector2.ZERO,
+		"facing": director.player.facing if is_instance_valid(director.player) else Vector2.ZERO,
+	}
 
 func _complete_current_state(director: FakeDirector) -> Dictionary:
 	return {

@@ -22,6 +22,8 @@ var _pending_restore := {}
 var _map_rebinder: Callable
 var _player_placement_hook: Callable
 var _transition_hook: Callable
+var _restore_finalize_hook: Callable
+var _last_restore_failure_context := {}
 
 func configure(world_host: Node2D, fade: ScreenFade) -> Error:
 	if world_host == null or fade == null:
@@ -57,6 +59,12 @@ func set_player_placement_hook(hook: Callable) -> void:
 
 func set_transition_hook(hook: Callable) -> void:
 	_transition_hook = hook
+
+func set_restore_finalize_hook(hook: Callable) -> void:
+	_restore_finalize_hook = hook
+
+func restore_failure_context() -> Dictionary:
+	return _last_restore_failure_context.duplicate(true)
 
 func change_map(map_id: StringName, spawn_id: StringName) -> Error:
 	if _transition_in_progress:
@@ -105,7 +113,8 @@ func commit_restore(plan: Dictionary) -> Error:
 	var candidate := plan.get("map") as MapScene
 	if candidate == null or _world_host == null:
 		return ERR_INVALID_PARAMETER
-	var previous_mode := GameSession.current_mode
+	_last_restore_failure_context.clear()
+	var previous_mode_context := GameSession.snapshot_mode_context()
 	var old_map := _current_map
 	var old_spawn_id := _current_spawn_id
 	var from_map := old_map.map_id if old_map != null else StringName()
@@ -150,10 +159,17 @@ func commit_restore(plan: Dictionary) -> Error:
 		candidate.queue_free()
 		if old_map != null:
 			_world_host.add_child(old_map)
-		_restore_player(old_body_parent, old_visual_parent, old_position, old_facing)
-		GameSession.change_mode(previous_mode)
-		_transition_in_progress = false
+		var rollback_failures := _restore_player(old_body_parent, old_visual_parent, old_position, old_facing)
+		if old_map != null and _map_rebinder.is_valid() and player != null:
+			var rebind_error: Error = int(_map_rebinder.call(player))
+			_append_restore_failure(rollback_failures, &"map_rebind", rebind_error)
 		await _fade.fade_in()
+		var mode_error := GameSession.restore_mode_context(previous_mode_context)
+		_append_restore_failure(rollback_failures, &"mode_context", mode_error)
+		_transition_in_progress = false
+		if not rollback_failures.is_empty():
+			_last_restore_failure_context = _restore_failure_context(rollback_failures, error)
+			return _last_restore_failure_context["error"]
 		return error
 
 	_current_map = candidate
@@ -167,7 +183,7 @@ func commit_restore(plan: Dictionary) -> Error:
 			"old_visual_parent": old_visual_parent,
 			"old_position": old_position,
 			"old_facing": old_facing,
-			"previous_mode": previous_mode,
+			"previous_mode_context": previous_mode_context,
 			"candidate": candidate,
 		}
 	else:
@@ -184,38 +200,55 @@ func has_pending_restore() -> bool:
 func finalize_restore() -> Error:
 	if _pending_restore.is_empty():
 		return ERR_UNCONFIGURED
+	await _fade.fade_in()
+	if _restore_finalize_hook.is_valid():
+		var hook_error: Error = int(_restore_finalize_hook.call())
+		if hook_error != OK:
+			_last_restore_failure_context = {"stage": &"finalize", "error": hook_error}
+			return hook_error
 	var old_map := _pending_restore.get("old_map") as MapScene
 	if old_map != null:
 		old_map.queue_free()
 	_pending_restore.clear()
 	_transition_in_progress = false
-	await _fade.fade_in()
 	return OK
 
 func rollback_restore() -> Error:
 	if _pending_restore.is_empty():
 		return ERR_UNCONFIGURED
+	_last_restore_failure_context.clear()
 	var candidate := _pending_restore.get("candidate") as MapScene
 	var old_map := _pending_restore.get("old_map") as MapScene
+	var old_body_parent := _pending_restore.get("old_body_parent") as Node
 	if candidate != null and candidate.get_parent() == _world_host:
 		_world_host.remove_child(candidate)
 		candidate.queue_free()
 	if old_map != null and old_map.get_parent() == null:
 		_world_host.add_child(old_map)
-	_restore_player(
-		_pending_restore.get("old_body_parent") as Node,
+	var rollback_failures := _restore_player(
+		old_body_parent,
 		_pending_restore.get("old_visual_parent") as Node,
 		_pending_restore.get("old_position", Vector2.ZERO),
 		_pending_restore.get("old_facing", Vector2.DOWN)
 	)
 	_current_map = old_map
 	_current_spawn_id = _pending_restore.get("old_spawn_id", &"")
-	if _map_rebinder.is_valid() and player != null:
-		_map_rebinder.call(player)
-	GameSession.change_mode(_pending_restore.get("previous_mode", GameMode.Value.MENU))
+	if old_map != null and _map_rebinder.is_valid() and player != null:
+		var rebind_error: Error = int(_map_rebinder.call(player))
+		_append_restore_failure(rollback_failures, &"map_rebind", rebind_error)
+	await _fade.fade_in()
+	var mode_context_value: Variant = _pending_restore.get("previous_mode_context", {})
+	var mode_error := ERR_INVALID_DATA
+	if typeof(mode_context_value) == TYPE_DICTIONARY:
+		mode_error = GameSession.restore_mode_context(mode_context_value)
+	_append_restore_failure(rollback_failures, &"mode_context", mode_error)
+	if old_body_parent == null:
+		player = null
 	_pending_restore.clear()
 	_transition_in_progress = false
-	await _fade.fade_in()
+	if not rollback_failures.is_empty():
+		_last_restore_failure_context = _restore_failure_context(rollback_failures)
+		return _last_restore_failure_context["error"]
 	return OK
 
 func capture_save_context() -> Dictionary:
@@ -260,16 +293,37 @@ func _place_player(map: MapScene, spawn_id: StringName) -> Error:
 	player.global_position = spawn.global_position
 	return player.attach_presentation(visual_root)
 
-func _restore_player(body_parent: Node, visual_parent: Node, previous_position: Vector2, previous_facing: Vector2) -> void:
+func _restore_player(body_parent: Node, visual_parent: Node, previous_position: Vector2, previous_facing: Vector2) -> Array[Dictionary]:
+	var failures: Array[Dictionary] = []
 	if player == null:
-		return
-	player.detach_presentation()
+		if body_parent != null or visual_parent != null:
+			failures.append({"stage": &"player", "error": ERR_DOES_NOT_EXIST})
+		return failures
+	_append_restore_failure(failures, &"player_detach", player.detach_presentation())
 	if body_parent != null:
 		body_parent.add_child(player) if player.get_parent() == null else player.reparent(body_parent, true)
 	player.global_position = previous_position
 	player.facing = previous_facing
 	if visual_parent is Node2D:
-		player.attach_presentation(visual_parent as Node2D)
+		_append_restore_failure(failures, &"player_attach", player.attach_presentation(visual_parent as Node2D))
+	elif body_parent != null:
+		failures.append({"stage": &"player_attach", "error": ERR_DOES_NOT_EXIST})
+	return failures
+
+func _append_restore_failure(failures: Array[Dictionary], stage: StringName, error: Error) -> void:
+	if error != OK:
+		failures.append({"stage": stage, "error": error})
+
+func _restore_failure_context(failures: Array[Dictionary], primary_error: Error = OK) -> Dictionary:
+	var first_failure: Dictionary = failures[0]
+	var context := {
+		"stage": first_failure.get("stage", &"rollback"),
+		"error": first_failure.get("error", ERR_CANT_RESOLVE),
+		"failures": failures.duplicate(true),
+	}
+	if primary_error != OK:
+		context["primary_error"] = primary_error
+	return context
 
 func _free_plan_candidate(plan: Dictionary) -> void:
 	var candidate := plan.get("map") as MapScene

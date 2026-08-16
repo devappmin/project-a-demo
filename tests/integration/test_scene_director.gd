@@ -14,6 +14,7 @@ func run() -> void:
 		return
 	var director: Variant = harness["director"]
 	var host: Node2D = harness["host"]
+	var fade: ScreenFade = harness["fade"]
 
 	var failures: Array[Dictionary] = []
 	director.transition_failed.connect(func(context: Dictionary) -> void: failures.append(context))
@@ -144,10 +145,36 @@ func run() -> void:
 	finalize_plan["defer_finalize"] = true
 	var old_map_for_finalize := host.get_child(0) as MapScene
 	assert_eq(await director.commit_restore(finalize_plan), OK, "a second deferred restore can commit")
-	assert_eq(await director.finalize_restore(), OK, "successful restore finalizes explicitly")
+	fade.duration = 0.03
+	director.call_deferred("finalize_restore")
+	var locked_finalize_frames := 0
+	for _frame in range(30):
+		await get_tree().process_frame
+		if not director.has_pending_restore():
+			break
+		locked_finalize_frames += 1
+		assert_eq(GameSession.current_mode, GameModeResource.Value.TRANSITION, "deferred restore remains input-locked through non-zero fade-in")
+		assert_eq(await director.change_map(&"foundation_room", &"start"), ERR_BUSY, "map reentry stays locked through final fade-in")
+	assert_true(locked_finalize_frames > 0, "non-zero final fade retains pending restore state for observable frames")
+	fade.duration = 0.0
 	await get_tree().process_frame
 	assert_false(is_instance_valid(old_map_for_finalize), "finalize frees the retained old map only after restore success")
 	assert_false(director.has_pending_restore(), "finalize closes the pending restore transaction")
+	var rollback_rebind_calls := [0]
+	director.set_map_rebinder(func(_restored_player: PlayerController) -> Error:
+		rollback_rebind_calls[0] += 1
+		return OK if rollback_rebind_calls[0] == 1 else ERR_CANT_CONNECT
+	)
+	var rollback_failure_plan: Dictionary = director.prepare_restore(&"foundation_room", &"from_hall")
+	rollback_failure_plan["defer_finalize"] = true
+	assert_eq(await director.commit_restore(rollback_failure_plan), OK, "rollback-failure test mutates to a real committed candidate")
+	assert_eq(await director.rollback_restore(), ERR_CANT_CONNECT, "rollback propagates a real old-map rebinding failure")
+	assert_true(director.has_method("restore_failure_context"), "SceneDirector exposes structured restore failure context")
+	if director.has_method("restore_failure_context"):
+		var rollback_context: Dictionary = director.restore_failure_context()
+		assert_eq(rollback_context.get("stage"), &"map_rebind", "rollback failure context identifies the failing restoration stage")
+		assert_eq(rollback_context.get("error"), ERR_CANT_CONNECT, "rollback failure context includes the exact Godot error")
+	director.set_map_rebinder(Callable())
 	assert_true(director.has_method("set_transition_hook"), "SceneDirector exposes a reentry seam that runs after the transition lock")
 	if director.has_method("set_transition_hook") and returned_room != null:
 		assert_eq(returned_room.capture_world_objects(GameSession.world_state), OK, "reentry baseline captures the current world state")
@@ -169,6 +196,18 @@ func run() -> void:
 		assert_eq(GameSession.world_state.snapshot(), world_before, "reentrant new game preserves world state")
 		assert_eq(GameSession.play_time_seconds, play_time_before, "reentrant new game preserves play time")
 		director.call("set_transition_hook", Callable())
+	var player_restore_failure_plan: Dictionary = director.prepare_restore(&"foundation_room", &"from_hall")
+	player_restore_failure_plan["defer_finalize"] = true
+	assert_eq(await director.commit_restore(player_restore_failure_plan), OK, "player-restore failure test mutates to a real committed candidate")
+	player.presentation = null
+	assert_eq(await director.rollback_restore(), ERR_DOES_NOT_EXIST, "rollback propagates the first real player restoration error")
+	var player_restore_context: Dictionary = director.restore_failure_context()
+	assert_eq(player_restore_context.get("stage"), &"player_detach", "player rollback context identifies detach as the first failed stage")
+	assert_eq(player_restore_context.get("error"), ERR_DOES_NOT_EXIST, "player rollback context preserves the exact detach error")
+	assert_eq(player_restore_context.get("failures"), [
+		{"stage": &"player_detach", "error": ERR_DOES_NOT_EXIST},
+		{"stage": &"player_attach", "error": ERR_INVALID_PARAMETER},
+	], "player rollback context preserves both detach and attach failures")
 	await _cleanup_harness(harness)
 
 func _make_harness(director_script: Script, fade_script: Script) -> Dictionary:
@@ -178,6 +217,9 @@ func _make_harness(director_script: Script, fade_script: Script) -> Dictionary:
 	container.add_child(host)
 	var fade: Variant = fade_script.new()
 	fade.duration = 0.0
+	var curtain := ColorRect.new()
+	curtain.name = "Curtain"
+	fade.add_child(curtain)
 	container.add_child(fade)
 	var director: Variant = director_script.new()
 	container.add_child(director)
@@ -189,7 +231,7 @@ func _make_harness(director_script: Script, fade_script: Script) -> Dictionary:
 		return {}
 	GameSession.reset_new_game()
 	GameSession.change_mode(GameModeResource.Value.MENU)
-	return {"container": container, "director": director, "host": host}
+	return {"container": container, "director": director, "host": host, "fade": fade}
 
 func _cleanup_harness(harness: Dictionary) -> void:
 	var container := harness.get("container") as Node

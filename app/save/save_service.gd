@@ -22,6 +22,7 @@ var _busy := false
 var _restoring := false
 var _autosave_flush_queued := false
 var _pending_autosave_snapshot := {}
+var _restore_apply_hook: Callable
 
 func configure(scene_director: Node, dialogue_service: DialogueService) -> Error:
 	if scene_director == null or dialogue_service == null:
@@ -45,6 +46,9 @@ func configure(scene_director: Node, dialogue_service: DialogueService) -> Error
 	if not _dialogue_service.stable_checkpoint_reached.is_connected(dialogue_handler):
 		_dialogue_service.stable_checkpoint_reached.connect(dialogue_handler)
 	return OK
+
+func set_restore_apply_hook(hook: Callable) -> void:
+	_restore_apply_hook = hook
 
 func save_manual_slot(slot_id: StringName) -> Error:
 	if slot_id == &"auto" or slot_id not in SaveDataResource.SLOT_IDS:
@@ -93,7 +97,7 @@ func load_slot(slot_id: StringName) -> Error:
 	if not restore_plan_result.get("ok", false):
 		return _finish_load_failure(slot_id, restore_plan_result.get("error", ERR_INVALID_DATA), restore_plan_result.get("stage", &"preflight"))
 	var old_session := GameSession.snapshot_session()
-	var old_mode := GameSession.current_mode
+	var old_mode_context := GameSession.snapshot_mode_context()
 	_pending_autosave_snapshot.clear()
 	_restoring = true
 	var director_plan: Dictionary = restore_plan_result["director_plan"]
@@ -102,7 +106,14 @@ func load_slot(slot_id: StringName) -> Error:
 	var commit_error: Error = await _scene_director.call("commit_restore", director_plan)
 	if commit_error != OK:
 		_restoring = false
-		return _finish_load_failure(slot_id, commit_error, &"commit")
+		var director_context := _director_restore_failure_context()
+		var commit_details := {}
+		if not director_context.is_empty():
+			commit_details = {
+				"primary_error": director_context.get("primary_error", commit_error),
+				"rollback": director_context,
+			}
+		return _finish_load_failure(slot_id, commit_error, &"commit", {}, commit_details)
 	var session_data := {
 		"narrative_state": snapshot["narrative"].duplicate(true),
 		"world_state": snapshot["world"].duplicate(true),
@@ -112,26 +123,31 @@ func load_slot(slot_id: StringName) -> Error:
 	if apply_error == OK:
 		apply_error = _apply_player(snapshot["player"])
 	if apply_error == OK:
-		GameSession.change_mode(GameModeResource.Value.EXPLORATION)
-		if _dialogue_service.has_method("refresh_session_state"):
-			apply_error = _dialogue_service.refresh_session_state()
+		apply_error = _dialogue_service.refresh_session_state()
+	if apply_error == OK and _restore_apply_hook.is_valid():
+		apply_error = int(_restore_apply_hook.call())
+	var resumed_dialogue := false
 	if apply_error == OK and snapshot["dialogue"].get("active", false):
-		apply_error = _dialogue_service.resume_checkpoint(snapshot["dialogue"].duplicate(true))
+		apply_error = GameSession.restore_mode_context({"mode": GameModeResource.Value.EXPLORATION, "menu_origin_mode": -1})
+		if apply_error == OK:
+			apply_error = _dialogue_service.resume_checkpoint(snapshot["dialogue"].duplicate(true))
+			resumed_dialogue = apply_error == OK
+		if apply_error == OK:
+			apply_error = GameSession.restore_mode_context({"mode": GameModeResource.Value.TRANSITION, "menu_origin_mode": -1})
 	if apply_error != OK:
-		GameSession.restore_session(old_session)
-		GameSession.change_mode(old_mode)
-		await _scene_director.call("rollback_restore")
-		if _dialogue_service.has_method("refresh_session_state"):
-			_dialogue_service.refresh_session_state()
+		var rollback := await _rollback_load(old_session, old_mode_context, resumed_dialogue)
 		_restoring = false
-		return _finish_load_failure(slot_id, apply_error, &"apply")
+		return _finish_failed_restore(slot_id, apply_error, &"apply", rollback)
 	var finalize_error: Error = await _scene_director.call("finalize_restore")
 	if finalize_error != OK:
-		GameSession.restore_session(old_session)
-		GameSession.change_mode(old_mode)
-		await _scene_director.call("rollback_restore")
+		var rollback := await _rollback_load(old_session, old_mode_context, resumed_dialogue)
 		_restoring = false
-		return _finish_load_failure(slot_id, finalize_error, &"finalize")
+		return _finish_failed_restore(slot_id, finalize_error, &"finalize", rollback)
+	var final_mode := GameModeResource.Value.DIALOGUE if resumed_dialogue else GameModeResource.Value.EXPLORATION
+	var final_mode_error := GameSession.restore_mode_context({"mode": final_mode, "menu_origin_mode": -1})
+	if final_mode_error != OK:
+		_restoring = false
+		return _finish_load_failure(slot_id, final_mode_error, &"final_mode")
 	_restoring = false
 	_busy = false
 	load_completed.emit(slot_id)
@@ -174,6 +190,9 @@ func _capture_snapshot(slot_id: StringName, checkpoint_override: Dictionary) -> 
 	var position: Vector2 = position_value
 	if not is_finite(position.x) or not is_finite(position.y):
 		return {"ok": false, "error": ERR_INVALID_DATA}
+	var facing_name := _facing_name(facing_value)
+	if facing_name.is_empty():
+		return {"ok": false, "error": ERR_INVALID_DATA}
 	var snapshot := {
 		"schema_version": SaveDataResource.SCHEMA_VERSION,
 		"meta": {
@@ -186,7 +205,7 @@ func _capture_snapshot(slot_id: StringName, checkpoint_override: Dictionary) -> 
 			"map_id": String(context.get("map_id", "")),
 			"spawn_id": String(context.get("spawn_id", "")),
 			"position": {"x": position.x, "y": position.y},
-			"facing": _facing_name(facing_value),
+			"facing": facing_name,
 		},
 		"narrative": session["narrative_state"].duplicate(true),
 		"world": context.get("world", session["world_state"]).duplicate(true),
@@ -268,9 +287,62 @@ func _apply_player(player_data: Dictionary) -> Error:
 	player.set("facing", _facing_vector(String(player_data["facing"])))
 	return OK
 
-func _finish_load_failure(slot_id: StringName, error: Error, stage: StringName, diagnostic := {}) -> Error:
+func _rollback_load(old_session: Dictionary, old_mode_context: Dictionary, resumed_dialogue: bool) -> Dictionary:
+	var failures: Array[Dictionary] = []
+	if resumed_dialogue:
+		_dialogue_service.abort_dialogue(&"restore_rollback")
+		var relock_error := GameSession.restore_mode_context({
+			"mode": GameModeResource.Value.TRANSITION,
+			"menu_origin_mode": old_mode_context.get("menu_origin_mode", -1),
+		})
+		_append_rollback_failure(failures, &"relock", relock_error)
+	var session_error := GameSession.restore_session(old_session)
+	_append_rollback_failure(failures, &"session", session_error)
+	var director_error: Error = await _scene_director.call("rollback_restore")
+	if director_error != OK:
+		var director_context := _director_restore_failure_context()
+		if director_context.is_empty():
+			director_context = {"stage": &"director", "error": director_error}
+		failures.append(director_context)
+	var mode_error := GameSession.restore_mode_context(old_mode_context)
+	_append_rollback_failure(failures, &"mode_context", mode_error)
+	var refresh_error := _dialogue_service.refresh_session_state()
+	_append_rollback_failure(failures, &"dialogue_refresh", refresh_error)
+	if failures.is_empty():
+		return {"error": OK, "stage": &"", "failures": []}
+	var first_failure: Dictionary = failures[0]
+	return {
+		"error": first_failure.get("error", ERR_CANT_RESOLVE),
+		"stage": first_failure.get("stage", &"rollback"),
+		"failures": failures.duplicate(true),
+	}
+
+func _append_rollback_failure(failures: Array[Dictionary], stage: StringName, error: Error) -> void:
+	if error != OK:
+		failures.append({"stage": stage, "error": error})
+
+func _director_restore_failure_context() -> Dictionary:
+	if _scene_director != null and _scene_director.has_method("restore_failure_context"):
+		var context_value: Variant = _scene_director.call("restore_failure_context")
+		if typeof(context_value) == TYPE_DICTIONARY:
+			return (context_value as Dictionary).duplicate(true)
+	return {}
+
+func _finish_failed_restore(slot_id: StringName, primary_error: Error, primary_stage: StringName, rollback: Dictionary) -> Error:
+	if rollback.get("error", OK) != OK:
+		return _finish_load_failure(slot_id, rollback["error"], &"rollback", {}, {
+			"primary_error": primary_error,
+			"primary_stage": primary_stage,
+			"rollback": rollback,
+		})
+	return _finish_load_failure(slot_id, primary_error, primary_stage)
+
+func _finish_load_failure(slot_id: StringName, error: Error, stage: StringName, diagnostic := {}, details := {}) -> Error:
 	_busy = false
-	load_failed.emit(slot_id, {"error": error, "stage": stage, "diagnostic": diagnostic.duplicate(true)})
+	var context := {"error": error, "stage": stage, "diagnostic": diagnostic.duplicate(true)}
+	for key in details:
+		context[key] = details[key].duplicate(true) if typeof(details[key]) in [TYPE_DICTIONARY, TYPE_ARRAY] else details[key]
+	load_failed.emit(slot_id, context)
 	return error
 
 func _on_scene_checkpoint(kind: StringName) -> void:
@@ -286,7 +358,9 @@ func _facing_name(facing: Vector2) -> String:
 		return "right"
 	if facing == Vector2.UP:
 		return "up"
-	return "down"
+	if facing == Vector2.DOWN:
+		return "down"
+	return ""
 
 func _facing_vector(facing: String) -> Vector2:
 	match facing:

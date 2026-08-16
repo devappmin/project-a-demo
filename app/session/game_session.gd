@@ -68,6 +68,30 @@ func enter_menu() -> bool:
 func is_menu_from_exploration() -> bool:
 	return current_mode == GameMode.Value.MENU and _menu_origin_mode == GameMode.Value.EXPLORATION
 
+func snapshot_mode_context() -> Dictionary:
+	return {"mode": current_mode, "menu_origin_mode": _menu_origin_mode}
+
+func restore_mode_context(context: Dictionary) -> Error:
+	var keys := context.keys()
+	keys.sort()
+	if keys != ["menu_origin_mode", "mode"]:
+		return ERR_INVALID_DATA
+	if typeof(context["mode"]) != TYPE_INT or typeof(context["menu_origin_mode"]) != TYPE_INT:
+		return ERR_INVALID_DATA
+	var restored_mode: int = context["mode"]
+	var restored_origin: int = context["menu_origin_mode"]
+	if not _permissions.has(restored_mode) or (_initialized and restored_mode == GameMode.Value.BOOT):
+		return ERR_INVALID_DATA
+	if restored_origin not in [-1, GameMode.Value.EXPLORATION]:
+		return ERR_INVALID_DATA
+	if restored_origin != -1 and restored_mode not in [GameMode.Value.MENU, GameMode.Value.TRANSITION]:
+		return ERR_INVALID_DATA
+	var previous := current_mode
+	current_mode = restored_mode
+	_menu_origin_mode = restored_origin
+	mode_changed.emit(previous, current_mode)
+	return OK
+
 func can(action: StringName) -> bool:
 	return action in _permissions[current_mode]
 
