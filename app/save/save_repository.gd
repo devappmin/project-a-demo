@@ -61,7 +61,10 @@ func write_slot(slot_id: StringName, snapshot: Dictionary) -> Error:
 	if stage_error != OK:
 		return stage_error
 	var final_current := _read_candidate(paths.current, slot_id)
-	return OK if final_current.ok and final_current.data.get("checksum") == signed.get("checksum") else ERR_FILE_CORRUPT
+	if final_current.ok and final_current.data.get("checksum") == signed.get("checksum"):
+		return OK
+	var quarantine_error := _quarantine_rejected_current(paths)
+	return ERR_FILE_CORRUPT if quarantine_error == OK else quarantine_error
 
 func read_slot(slot_id: StringName) -> Dictionary:
 	if not _valid_slot(slot_id):
@@ -137,8 +140,21 @@ func _recover_backup(paths: Dictionary, _current: Dictionary, backup: Dictionary
 		return stage_error
 	var final_current := _read_candidate(paths.current, paths.slot_id)
 	if not final_current.ok or final_current.data.get("checksum") != backup.data.get("checksum"):
-		return ERR_FILE_CORRUPT
+		var quarantine_error := _quarantine_rejected_current(paths)
+		return ERR_FILE_CORRUPT if quarantine_error == OK else quarantine_error
 	return OK
+
+func _quarantine_rejected_current(paths: Dictionary) -> Error:
+	if not FileAccess.file_exists(paths.current):
+		return OK
+	if FileAccess.file_exists(paths.temp):
+		var temp_cleanup_error := DirAccess.remove_absolute(paths.temp)
+		if temp_cleanup_error != OK:
+			return temp_cleanup_error
+	var quarantine_error := DirAccess.rename_absolute(paths.current, paths.temp)
+	if quarantine_error == OK:
+		return OK
+	return DirAccess.remove_absolute(paths.current)
 
 func _read_candidate(path: String, expected_slot_id: StringName) -> Dictionary:
 	if not FileAccess.file_exists(path):

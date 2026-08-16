@@ -27,6 +27,38 @@ func _test_schema_contract(script: Script) -> void:
 	var extra_top := valid.duplicate(true)
 	extra_top["inventory"] = {}
 	assert_false(script.call("validate", extra_top).is_empty(), "unknown top-level sections are rejected")
+	var leaf_cases: Array[Dictionary] = [
+		{"path": ["schema_version"], "wrong": "1", "label": "schema_version"},
+		{"path": ["checksum"], "wrong": 123, "label": "checksum"},
+		{"path": ["meta", "slot_id"], "wrong": &"slot_1", "label": "meta.slot_id"},
+		{"path": ["meta", "saved_at"], "wrong": 123, "label": "meta.saved_at"},
+		{"path": ["meta", "play_time_seconds"], "wrong": "1", "label": "meta.play_time_seconds"},
+		{"path": ["meta", "location_name"], "wrong": &"기초 방", "label": "meta.location_name"},
+		{"path": ["player", "map_id"], "wrong": &"foundation_room", "label": "player.map_id"},
+		{"path": ["player", "spawn_id"], "wrong": &"start", "label": "player.spawn_id"},
+		{"path": ["player", "position"], "wrong": [], "label": "player.position"},
+		{"path": ["player", "position", "x"], "wrong": "120", "label": "player.position.x"},
+		{"path": ["player", "position", "y"], "wrong": "88", "label": "player.position.y"},
+		{"path": ["player", "facing"], "wrong": &"down", "label": "player.facing"},
+		{"path": ["narrative", "flags"], "wrong": [], "label": "narrative.flags"},
+		{"path": ["narrative", "stats"], "wrong": [], "label": "narrative.stats"},
+		{"path": ["narrative", "inventory"], "wrong": [], "label": "narrative.inventory"},
+		{"path": ["narrative", "quests"], "wrong": [], "label": "narrative.quests"},
+		{"path": ["narrative", "collectibles"], "wrong": [], "label": "narrative.collectibles"},
+		{"path": ["world", "maps"], "wrong": [], "label": "world.maps"},
+		{"path": ["dialogue", "active"], "wrong": 1, "label": "dialogue.active"},
+		{"path": ["dialogue", "bundle_key"], "wrong": &"", "label": "dialogue.bundle_key"},
+		{"path": ["dialogue", "trigger_key"], "wrong": &"", "label": "dialogue.trigger_key"},
+		{"path": ["dialogue", "node_id"], "wrong": &"", "label": "dialogue.node_id"},
+		{"path": ["dialogue", "boundary"], "wrong": &"", "label": "dialogue.boundary"},
+	]
+	for case_data in leaf_cases:
+		var missing_leaf := valid.duplicate(true)
+		_erase_nested(missing_leaf, case_data["path"])
+		assert_false(script.call("validate", missing_leaf).is_empty(), "missing schema-v1 leaf %s is rejected" % case_data["label"])
+		var wrong_leaf := valid.duplicate(true)
+		_set_nested(wrong_leaf, case_data["path"], case_data["wrong"])
+		assert_false(script.call("validate", wrong_leaf).is_empty(), "wrong type for schema-v1 leaf %s is rejected" % case_data["label"])
 	for mutation in [
 		{"path": ["meta", "slot_id"], "value": "slot_6", "label": "unknown slot"},
 		{"path": ["meta", "saved_at"], "value": "16 August", "label": "non-ISO timestamp"},
@@ -47,9 +79,6 @@ func _test_schema_contract(script: Script) -> void:
 		candidate["player"]["facing"] = facing
 		candidate = script.call("with_checksum", _without_checksum(candidate))
 		assert_eq(script.call("validate", candidate), [], "%s is a supported facing" % facing)
-	var incomplete_narrative := valid.duplicate(true)
-	incomplete_narrative["narrative"].erase("collectibles")
-	assert_false(script.call("validate", incomplete_narrative).is_empty(), "NarrativeState shape must be complete")
 	var incomplete_world := valid.duplicate(true)
 	incomplete_world["world"] = {}
 	assert_false(script.call("validate", incomplete_world).is_empty(), "WorldState shape must contain maps")
@@ -114,6 +143,25 @@ func _test_json_domain(script: Script) -> void:
 		var candidate := _snapshot_without_checksum()
 		candidate["narrative"]["inventory"] = {"unsafe": unsafe_integer}
 		assert_eq(script.call("with_checksum", candidate), {}, "integer outside exact JSON float range is rejected")
+	for unsupported_key in [StringName("named_key"), 7, Vector2.ONE]:
+		var candidate := _snapshot_without_checksum()
+		var unsupported_dictionary := {}
+		unsupported_dictionary[unsupported_key] = "value"
+		candidate["narrative"]["inventory"] = {"nested": unsupported_dictionary}
+		assert_eq(script.call("with_checksum", candidate), {}, "unsupported nested dictionary key Variant is rejected")
+	for invalid_world_maps in [
+		{"foundation_room": []},
+		{"foundation_room": {"mirror": []}},
+	]:
+		var candidate := _snapshot_without_checksum()
+		candidate["world"]["maps"] = invalid_world_maps
+		assert_eq(script.call("with_checksum", candidate), {}, "WorldState map, object, and object-state members require dictionaries")
+	var invalid_map_key := _snapshot_without_checksum()
+	invalid_map_key["world"]["maps"] = {&"foundation_room": {}}
+	assert_eq(script.call("with_checksum", invalid_map_key), {}, "WorldState map keys require JSON strings")
+	var invalid_object_key := _snapshot_without_checksum()
+	invalid_object_key["world"]["maps"] = {"foundation_room": {&"mirror": {}}}
+	assert_eq(script.call("with_checksum", invalid_object_key), {}, "WorldState object keys require JSON strings")
 	forbidden_node.free()
 
 func _test_canonical_checksum(script: Script) -> void:
@@ -184,3 +232,9 @@ func _set_nested(target: Dictionary, path: Array, value: Variant) -> void:
 	for index in range(path.size() - 1):
 		cursor = cursor[path[index]]
 	cursor[path[-1]] = value
+
+func _erase_nested(target: Dictionary, path: Array) -> void:
+	var cursor := target
+	for index in range(path.size() - 1):
+		cursor = cursor[path[index]]
+	cursor.erase(path[-1])
