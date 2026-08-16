@@ -20,6 +20,8 @@ func show_toast(text: String) -> void:
 		timer.start(display_seconds)
 
 func hide_toast() -> void:
+	_current_message = ""
+	message_label.text = ""
 	visible = false
 
 func current_message() -> String:

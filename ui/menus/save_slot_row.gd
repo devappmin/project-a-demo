@@ -4,6 +4,7 @@ class_name SaveSlotRow
 signal slot_activated(slot_id: StringName)
 
 const SLOT_IDS := [&"auto", &"slot_1", &"slot_2", &"slot_3", &"slot_4", &"slot_5"]
+const _TIMESTAMP_PATTERN := "^(\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2})(?:\\.\\d+)?(Z|([+-])(\\d{2}):(\\d{2}))$"
 
 @onready var slot_label: Label = $Content/SlotLabel
 @onready var location_label: Label = $Content/Location
@@ -59,9 +60,41 @@ func _format_play_time(seconds: float) -> String:
 	return "%02d:%02d:%02d" % [total / 3600, (total % 3600) / 60, total % 60]
 
 func _format_timestamp(value: String) -> String:
-	var utc := Time.get_datetime_dict_from_datetime_string(value, false)
-	if utc.is_empty():
+	var regex := RegEx.new()
+	if regex.compile(_TIMESTAMP_PATTERN) != OK:
 		return ""
-	var local_unix := Time.get_unix_time_from_datetime_dict(utc) + int(Time.get_time_zone_from_system().get("bias", 0)) * 60
+	var match_result := regex.search(value)
+	if match_result == null:
+		return ""
+	var source := Time.get_datetime_dict_from_datetime_string(match_result.get_string(1), false)
+	if not _valid_datetime(source):
+		return ""
+	var source_offset_minutes := 0
+	if match_result.get_string(2) != "Z":
+		var offset_hours := int(match_result.get_string(4))
+		var offset_minutes := int(match_result.get_string(5))
+		if offset_hours > 23 or offset_minutes > 59:
+			return ""
+		source_offset_minutes = offset_hours * 60 + offset_minutes
+		if match_result.get_string(3) == "-":
+			source_offset_minutes = -source_offset_minutes
+	var utc_unix := Time.get_unix_time_from_datetime_dict(source) - source_offset_minutes * 60
+	var local_unix := utc_unix + int(Time.get_time_zone_from_system().get("bias", 0)) * 60
 	var local := Time.get_datetime_dict_from_unix_time(local_unix)
 	return "%04d-%02d-%02d %02d:%02d" % [local.year, local.month, local.day, local.hour, local.minute]
+
+func _valid_datetime(value: Dictionary) -> bool:
+	var year := int(value.get("year", 0))
+	var month := int(value.get("month", 0))
+	var day := int(value.get("day", 0))
+	var hour := int(value.get("hour", -1))
+	var minute := int(value.get("minute", -1))
+	var second := int(value.get("second", -1))
+	if year <= 0 or month < 1 or month > 12 or day < 1 or day > _days_in_month(year, month):
+		return false
+	return hour >= 0 and hour <= 23 and minute >= 0 and minute <= 59 and second >= 0 and second <= 59
+
+func _days_in_month(year: int, month: int) -> int:
+	if month == 2:
+		return 29 if year % 400 == 0 or (year % 4 == 0 and year % 100 != 0) else 28
+	return 30 if month in [4, 6, 9, 11] else 31

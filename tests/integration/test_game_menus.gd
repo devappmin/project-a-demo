@@ -1,6 +1,7 @@
 extends "res://tests/support/test_case.gd"
 
 const GameModeResource = preload("res://app/session/game_mode.gd")
+const SaveDataResource = preload("res://app/save/save_data.gd")
 const SaveRepositoryResource = preload("res://app/save/save_repository.gd")
 const REQUIRED_SCENES := [
 	"res://ui/menus/title_menu.tscn",
@@ -39,6 +40,7 @@ func run() -> void:
 	assert_true(InputMap.has_action("menu"), "the menu input action exists")
 	assert_true(InputMap.action_get_events("menu").any(func(event: InputEvent) -> bool: return event is InputEventKey and (event as InputEventKey).keycode == KEY_ESCAPE), "the menu action is bound to Escape")
 	await _test_complete_title_pause_and_service_flow()
+	await _test_successful_title_and_ingame_load_orchestration()
 
 func _test_complete_title_pause_and_service_flow() -> void:
 	var fake_repository := FakeRepository.new()
@@ -107,6 +109,24 @@ func _test_complete_title_pause_and_service_flow() -> void:
 	await _wait_frames(2)
 	assert_true(slots.visible, "cancelling overwrite returns to the slot list")
 	assert_eq((root.get_viewport().gui_get_focus_owner() as Node).get("slot_id"), &"slot_1", "cancelling overwrite restores the invoking row focus")
+	toast.set("display_seconds", 0.01)
+	var player := SceneDirector.get("player") as Node
+	player.set("facing", Vector2.ZERO)
+	(rows[2] as Node).call("activate")
+	await _wait_frames(1)
+	assert_true(toast.visible, "a capture-stage manual-save failure shows feedback through AppRoot")
+	assert_eq(toast.call("current_message"), "저장할 수 없습니다", "capture-stage failure uses the generic save notice")
+	await get_tree().create_timer(0.05).timeout
+	await _wait_frames(1)
+	assert_false(toast.visible, "the failure toast expires through its real Timer")
+	assert_eq(toast.call("current_message"), "", "an expired toast does not retain a stale visible-message identity")
+	(rows[2] as Node).call("activate")
+	await _wait_frames(1)
+	assert_true(toast.visible, "retrying the same capture-stage failure after expiry shows feedback again")
+	assert_eq(toast.call("current_message"), "저장할 수 없습니다", "the repeated failure restores the exact generic notice")
+	player.set("facing", Vector2.DOWN)
+	toast.call("hide_toast")
+	toast.set("display_seconds", 2.4)
 	(rows[2] as Node).call("activate")
 	await _wait_frames(3)
 	assert_false(confirm.visible, "an empty manual slot saves without overwrite confirmation")
@@ -170,6 +190,59 @@ func _test_complete_title_pause_and_service_flow() -> void:
 	assert_eq(quit_requests[0], 1, "quit uses a testable request seam instead of terminating the test runner")
 	await _free_root(root)
 
+func _test_successful_title_and_ingame_load_orchestration() -> void:
+	GameSession.reset_new_game()
+	var fake_repository := FakeRepository.new()
+	fake_repository.metadata_by_slot = {&"slot_1": _metadata(&"slot_1", "기초 방")}
+	SaveService.repository = fake_repository
+	var root := await _make_root()
+	var title := root.get_node("UILayer/TitleMenu") as Control
+	var pause := root.get_node("UILayer/PauseMenu") as Control
+	var slots := root.get_node("UILayer/SlotMenu") as Control
+	var confirm := root.get_node("UILayer/ConfirmPanel") as Control
+	var world_host := root.get_node("WorldHost") as Node2D
+	var dialogue_view := root.get_node("UILayer/DialogueView") as Control
+	var inactive_dialogue := {"active": false, "bundle_key": "", "trigger_key": "", "node_id": "", "boundary": ""}
+	fake_repository.read_results[&"slot_1"] = _successful_read(_signed_snapshot(&"slot_1", inactive_dialogue))
+	(title.get_node("Panel/Margin/Buttons/Load") as Button).pressed.emit()
+	await _wait_frames(2)
+	var rows: Array = slots.call("get_rows")
+	var title_load_result: Dictionary = await _activate_and_wait_for_load(rows[1] as Node)
+	assert_eq(title_load_result, {"completed": &"slot_1"}, "title load completes through the real SaveService orchestration")
+	assert_false(title.visible, "successful title load closes the title menu")
+	assert_false(pause.visible, "successful title load leaves pause closed")
+	assert_false(slots.visible, "successful title load closes the shared slot menu")
+	assert_false(confirm.visible, "successful title load leaves confirmation closed")
+	assert_true(world_host.visible and world_host.get_child_count() == 1, "successful title load reveals exactly one restored world")
+	assert_false(dialogue_view.visible, "an inactive-dialogue title load keeps dialogue UI hidden")
+	assert_eq(GameSession.current_mode, GameModeResource.Value.EXPLORATION, "inactive title load resumes exploration")
+
+	root.call("handle_menu_action")
+	await _wait_frames(2)
+	assert_true(pause.visible, "the restored title-load game can open pause from exploration")
+	var active_dialogue := {
+		"active": true,
+		"bundle_key": "foundation.inspect",
+		"trigger_key": "mirror.inspect",
+		"node_id": "default.inspect.line_e5b0e4bd5f23",
+		"boundary": "line",
+	}
+	fake_repository.read_results[&"slot_1"] = _successful_read(_signed_snapshot(&"slot_1", active_dialogue))
+	(pause.get_node("Panel/Margin/Buttons/Load") as Button).pressed.emit()
+	await _wait_frames(2)
+	rows = slots.call("get_rows")
+	var ingame_load_result: Dictionary = await _activate_and_wait_for_load(rows[1] as Node)
+	assert_eq(ingame_load_result, {"completed": &"slot_1"}, "in-game load completes through the real SaveService orchestration")
+	assert_false(title.visible, "successful in-game load keeps title closed")
+	assert_false(pause.visible, "successful in-game load closes pause")
+	assert_false(slots.visible, "successful in-game load closes the shared slot menu")
+	assert_false(confirm.visible, "successful in-game load closes confirmation")
+	assert_true(world_host.visible and world_host.get_child_count() == 1, "successful in-game load keeps the restored world visible")
+	assert_true(dialogue_view.visible, "an active checkpoint load restores dialogue UI visibility")
+	assert_eq(root.get_node("ServiceLayer/DialogueService").call("get_checkpoint"), active_dialogue, "in-game load resumes the exact saved active checkpoint")
+	assert_eq(GameSession.current_mode, GameModeResource.Value.DIALOGUE, "active checkpoint load restores dialogue mode")
+	await _free_root(root)
+
 func _make_root() -> Node:
 	GameSession.restore_mode_context({"mode": GameModeResource.Value.MENU, "menu_origin_mode": -1})
 	var scene := load("res://app/bootstrap/app_root.tscn") as PackedScene
@@ -192,6 +265,39 @@ func _metadata(slot_id: StringName, location: String) -> Dictionary:
 		"location_name": location,
 		"recoverable": false,
 	}
+
+func _signed_snapshot(slot_id: StringName, dialogue: Dictionary) -> Dictionary:
+	var session := GameSession.snapshot_session()
+	return SaveDataResource.with_checksum({
+		"schema_version": 1,
+		"meta": {"slot_id": String(slot_id), "saved_at": "2026-08-16T12:34:56Z", "play_time_seconds": 42.0, "location_name": "기초 방"},
+		"player": {"map_id": "foundation_room", "spawn_id": "start", "position": {"x": 120.0, "y": 88.0}, "facing": "down"},
+		"narrative": session["narrative_state"].duplicate(true),
+		"world": session["world_state"].duplicate(true),
+		"dialogue": dialogue.duplicate(true),
+	})
+
+func _successful_read(snapshot: Dictionary) -> Dictionary:
+	return {"ok": true, "error": OK, "data": snapshot.duplicate(true), "recovered": false, "diagnostic": {}}
+
+func _activate_and_wait_for_load(row: Node) -> Dictionary:
+	var outcome := {}
+	var completed_handler := func(slot_id: StringName) -> void:
+		outcome["completed"] = slot_id
+	var failed_handler := func(slot_id: StringName, context: Dictionary) -> void:
+		outcome["failed"] = {"slot_id": slot_id, "context": context.duplicate(true)}
+	SaveService.load_completed.connect(completed_handler)
+	SaveService.load_failed.connect(failed_handler)
+	row.call("activate")
+	for _frame: int in 120:
+		if not outcome.is_empty():
+			break
+		await get_tree().process_frame
+	if SaveService.load_completed.is_connected(completed_handler):
+		SaveService.load_completed.disconnect(completed_handler)
+	if SaveService.load_failed.is_connected(failed_handler):
+		SaveService.load_failed.disconnect(failed_handler)
+	return outcome.duplicate(true)
 
 func _button_texts(control: Control) -> Array[String]:
 	var texts: Array[String] = []

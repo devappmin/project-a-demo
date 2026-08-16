@@ -11,6 +11,7 @@ func run() -> void:
 	await _test_populated_metadata_formatting_and_clipping()
 	await _test_refresh_copies_metadata_and_keeps_focus()
 	await _test_keyboard_navigation_skips_disabled_rows()
+	await _test_recovery_toast_does_not_overlap_back_action()
 
 func _test_six_ordered_rows_fit_the_pixel_viewport() -> void:
 	var menu := await _make_menu(&"load", _metadata_fixture())
@@ -62,7 +63,17 @@ func _test_populated_metadata_formatting_and_clipping() -> void:
 	var auto_row := rows[0] as Control
 	assert_eq(auto_row.get_node("Content/Location").text, "기초 홀", "a populated row renders its location")
 	assert_eq(auto_row.get_node("Content/PlayTime").text, "00:20:34", "play time renders as HH:MM:SS")
-	assert_eq(auto_row.get_node("Content/SavedAt").text, _localized_timestamp("2026-08-16T12:34:56Z"), "timestamp renders in local time")
+	var timestamp_cases := [
+		{"value": "2026-08-16T12:34:56Z", "expected": "2026-08-16 21:34", "label": "UTC Z"},
+		{"value": "2026-08-16T21:34:56+09:00", "expected": "2026-08-16 21:34", "label": "positive source offset"},
+		{"value": "2026-08-16T08:34:56-04:00", "expected": "2026-08-16 21:34", "label": "negative source offset"},
+		{"value": "not-a-timestamp", "expected": "", "label": "malformed timestamp"},
+	]
+	for case_data: Dictionary in timestamp_cases:
+		var item: Dictionary = metadata[0].duplicate(true)
+		item["saved_at"] = case_data["value"]
+		assert_eq(auto_row.call("configure", item, &"load"), OK, "%s timestamp fixture configures" % case_data["label"])
+		assert_eq(auto_row.get_node("Content/SavedAt").text, case_data["expected"], "%s is interpreted as an instant and rendered in Korea local time" % case_data["label"])
 	var long_row := rows[1] as Control
 	var location := long_row.get_node("Content/Location") as Label
 	assert_true(location.clip_text, "long locations are clipped within the location cell")
@@ -111,6 +122,25 @@ func _test_keyboard_navigation_skips_disabled_rows() -> void:
 	assert_eq((menu.get_viewport().gui_get_focus_owner() as Node).get("slot_id"), &"slot_1", "up skips disabled rows in reverse")
 	await _free_menu(menu)
 
+func _test_recovery_toast_does_not_overlap_back_action() -> void:
+	var menu := await _make_menu(&"load", _metadata_fixture())
+	var toast_scene := load("res://ui/hud/toast_layer.tscn") as PackedScene
+	var toast := toast_scene.instantiate() as Control
+	toast.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	toast.set("display_seconds", 0.0)
+	get_tree().root.add_child(toast)
+	toast.call("show_toast", "백업 저장을 복구했습니다")
+	await get_tree().process_frame
+	var back_rect := (menu.get_node("Panel/Margin/Layout/Back") as Control).get_global_rect()
+	var toast_rect := (toast.get_node("Toast") as Control).get_global_rect()
+	assert_eq(menu.get_viewport_rect().size, Vector2(640, 360), "toast geometry is measured in the real 640x360 viewport")
+	assert_false(back_rect.intersects(toast_rect), "the recovery toast never overlaps the bottom back action")
+	assert_true(back_rect.end.y <= toast_rect.position.y, "the slot menu reserves a vertical band above the recovery toast")
+	assert_true(toast_rect.position.y >= 0.0 and toast_rect.end.y <= 360.0, "the recovery toast remains fully visible inside the viewport")
+	toast.queue_free()
+	await get_tree().process_frame
+	await _free_menu(menu)
+
 func _make_menu(mode: StringName, metadata: Array[Dictionary]) -> Control:
 	var scene := load(MENU_PATH) as PackedScene
 	var menu := scene.instantiate() as Control
@@ -133,12 +163,6 @@ func _metadata_fixture() -> Array[Dictionary]:
 		{"slot_id": &"slot_4", "label": "슬롯 4", "exists": true, "enabled": true, "read_only": false, "recoverable": false, "location_name": "기초 방", "play_time_seconds": 7.0, "saved_at": "2026-08-16T01:02:03Z"},
 		{"slot_id": &"slot_5", "label": "슬롯 5", "exists": false, "enabled": false, "read_only": false, "recoverable": false},
 	]
-
-func _localized_timestamp(value: String) -> String:
-	var utc := Time.get_datetime_dict_from_datetime_string(value, false)
-	var local_unix := Time.get_unix_time_from_datetime_dict(utc) + int(Time.get_time_zone_from_system().get("bias", 0)) * 60
-	var local := Time.get_datetime_dict_from_unix_time(local_unix)
-	return "%04d-%02d-%02d %02d:%02d" % [local.year, local.month, local.day, local.hour, local.minute]
 
 func _contains_type(node: Node, type_name: String) -> bool:
 	if node.is_class(type_name):
