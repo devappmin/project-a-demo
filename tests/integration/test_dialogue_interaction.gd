@@ -53,9 +53,10 @@ func run() -> void:
 	var adapter := app.get_node_or_null("ServiceLayer/DialogueActionAdapter")
 	_test_single_app_composition(router, dialogue, adapter)
 	_test_production_fixture_is_immutable()
-	_test_invalid_adapter_payloads_are_ignored(router, dialogue)
+	_test_invalid_adapter_payloads_are_ignored(router, dialogue, adapter)
 	_test_talk_payload_starts_and_abort_restores(router, dialogue, view)
 	_test_empty_override_starts_at_entry(router, dialogue, view)
+	await _test_document_event_resolution(adapter, dialogue, view)
 	await _test_visible_mirror_keyboard_flow(app, router, dialogue, view, probe)
 	var original_dialogue_loader: DialogueGraphLoader = dialogue.graph_loader
 	await _test_plan3_replacement_snapshot(app, dialogue, view, probe)
@@ -121,7 +122,7 @@ func _test_production_fixture_is_immutable() -> void:
 	var unchanged_first: Dictionary = unchanged_first_value
 	assert_eq(unchanged_first.get("text", ""), original_text, "fixture choices are returned as deep copies")
 
-func _test_invalid_adapter_payloads_are_ignored(router: InteractionRouter, dialogue: DialogueService) -> void:
+func _test_invalid_adapter_payloads_are_ignored(router: InteractionRouter, dialogue: DialogueService, adapter: Node) -> void:
 	var invalid_requests: Array[Dictionary] = [
 		{"kind":&"use", "payload":{"scene_key":&"foundation.inspect", "node_id":&"line_1"}},
 		{"kind":&"inspect", "payload":{}},
@@ -133,6 +134,9 @@ func _test_invalid_adapter_payloads_are_ignored(router: InteractionRouter, dialo
 		router.action_requested.emit(request["kind"], request["payload"])
 		assert_eq(GameSession.current_mode, GameModeResource.Value.EXPLORATION, "unsupported or malformed action preserves exploration")
 		assert_eq(dialogue.current_graph, null, "unsupported or malformed action does not start dialogue")
+	if adapter != null:
+		assert_eq(adapter.call("handle_action", &"use", {"scene_key":&"foundation.inspect"}), ERR_INVALID_PARAMETER, "direct unsupported action exposes its real error")
+		assert_eq(adapter.call("handle_action", &"inspect", {}), ERR_INVALID_PARAMETER, "direct malformed payload exposes its real error")
 
 func _test_talk_payload_starts_and_abort_restores(router: InteractionRouter, dialogue: DialogueService, view: DialogueView) -> void:
 	router.action_requested.emit(&"talk", {"scene_key":&"foundation.inspect"})
@@ -154,6 +158,86 @@ func _test_empty_override_starts_at_entry(router: InteractionRouter, dialogue: D
 	dialogue.abort_dialogue(&"test_cleanup")
 	assert_eq(GameSession.current_mode, GameModeResource.Value.EXPLORATION, "empty-override abort restores exploration")
 	assert_false(view.visible, "empty-override abort hides the dialogue view")
+
+func _test_document_event_resolution(adapter: Node, dialogue: DialogueService, view: DialogueView) -> void:
+	if adapter == null:
+		return
+	var index_script: Script = load("res://game/narrative/dialogue/dialogue_event_index.gd")
+	var resolver_script: Script = load("res://game/narrative/dialogue/dialogue_event_resolver.gd")
+	var original_loader: DialogueGraphLoader = dialogue.graph_loader
+	var original_resolver: Variant = adapter.get("event_resolver")
+	var output_directory := "user://test-output/dialogue-event-runtime-%s" % Time.get_ticks_usec()
+	var absolute_directory := ProjectSettings.globalize_path(output_directory)
+	var graph_path := output_directory.path_join("foundation_inspect.json")
+	assert_eq(DirAccess.make_dir_recursive_absolute(absolute_directory), OK, "document event graph directory is created")
+	var graph := {
+		"schema_version":1,
+		"scene_key":"foundation.inspect",
+		"entry_node":"seen.start.line",
+		"nodes":{
+			"seen.start.line":{"type":"line", "speaker":"retti", "expression":"neutral", "text":"이미 본 거울", "next":"seen.end"},
+			"seen.end":{"type":"end"},
+			"default.start.line":{"type":"line", "speaker":"retti", "expression":"neutral", "text":"처음 보는 거울", "next":"default.choice"},
+			"default.choice":{"type":"choice", "items":[{"text":"자세히 본다", "conditions":[], "effects":[], "next":"default.result"}]},
+			"default.result":{"type":"effect", "effects":[{"kind":"flag_set", "key":"mirror_seen", "value":true}], "next":"default.end"},
+			"default.end":{"type":"end"},
+		},
+	}
+	var file := FileAccess.open(graph_path, FileAccess.WRITE)
+	assert_not_null(file, "document event graph opens for writing")
+	if file == null:
+		_cleanup_document_event_resolution(adapter, dialogue, original_resolver, original_loader, graph_path, absolute_directory)
+		return
+	file.store_string(JSON.stringify(graph))
+	file.close()
+	var loader := DialogueGraphLoader.new()
+	loader.base_directory = output_directory
+	dialogue.graph_loader = loader
+	var resolver: RefCounted = resolver_script.new()
+	resolver.event_index = index_script.from_dictionary(_runtime_event_index(true))
+	adapter.set("event_resolver", resolver)
+	GameSession.narrative_state.set_flag(&"mirror_seen", false)
+	var fallback_error: Variant = adapter.call("handle_action", &"inspect", {"dialogue_bundle_key":&"foundation.inspect", "dialogue_trigger_key":&"mirror.inspect"})
+	assert_eq(fallback_error, OK, "document payload starts its fallback event")
+	assert_eq(dialogue.current_node_id, &"default.start.line", "false condition selects the ordered fallback entry")
+	dialogue.advance()
+	await get_tree().process_frame
+	assert_eq(_current_node_type(dialogue), "choice", "fallback reaches its first choice")
+	assert_eq(dialogue.choose(0), OK, "fallback choice completes through its result")
+	assert_true(GameSession.narrative_state.get_flag(&"mirror_seen"), "fallback result is recorded by the dialogue transaction")
+	assert_eq(GameSession.current_mode, GameModeResource.Value.EXPLORATION, "completed fallback returns to exploration")
+	assert_false(view.visible, "completed fallback closes the dialogue view")
+	var specific_error: Variant = adapter.call("handle_action", &"inspect", {"dialogue_bundle_key":&"foundation.inspect", "dialogue_trigger_key":&"mirror.inspect"})
+	assert_eq(specific_error, OK, "same document payload resolves again after state changes")
+	assert_eq(dialogue.current_node_id, &"seen.start.line", "second interaction selects the first matching specific event")
+	dialogue.abort_dialogue(&"test_cleanup")
+	GameSession.narrative_state.set_flag(&"mirror_seen", false)
+	resolver.event_index = index_script.from_dictionary(_runtime_event_index(false))
+	var before: Dictionary = GameSession.narrative_state.snapshot()
+	var no_match_error: Variant = adapter.call("handle_action", &"inspect", {"dialogue_bundle_key":&"foundation.inspect", "dialogue_trigger_key":&"mirror.inspect"})
+	assert_eq(no_match_error, ERR_DOES_NOT_EXIST, "no matching document event returns the resolver error")
+	assert_eq(GameSession.current_mode, GameModeResource.Value.EXPLORATION, "no-match stays in exploration")
+	assert_eq(dialogue.current_graph, null, "no-match never opens a dialogue graph")
+	assert_false(view.visible, "no-match never opens DialogueView")
+	assert_eq(GameSession.narrative_state.snapshot(), before, "no-match preserves the complete narrative state")
+	_cleanup_document_event_resolution(adapter, dialogue, original_resolver, original_loader, graph_path, absolute_directory)
+
+func _runtime_event_index(with_fallback: bool) -> Dictionary:
+	var candidates: Array[Dictionary] = [{"event_key":"seen", "entry_node":"seen.start.line", "conditions":[{"kind":"flag", "key":"mirror_seen", "operator":"eq", "value":true}]}]
+	if with_fallback:
+		candidates.append({"event_key":"default", "entry_node":"default.start.line", "conditions":[]})
+	return {"schema_version":1, "bundles":{"foundation.inspect":{"triggers":{"mirror.inspect":candidates}}}}
+
+func _cleanup_document_event_resolution(adapter: Node, dialogue: DialogueService, original_resolver: Variant, original_loader: DialogueGraphLoader, graph_path: String, absolute_directory: String) -> void:
+	if dialogue.current_graph != null:
+		dialogue.abort_dialogue(&"test_cleanup")
+	adapter.set("event_resolver", original_resolver)
+	dialogue.graph_loader = original_loader
+	var absolute_graph_path := ProjectSettings.globalize_path(graph_path)
+	if FileAccess.file_exists(absolute_graph_path):
+		DirAccess.remove_absolute(absolute_graph_path)
+	if DirAccess.dir_exists_absolute(absolute_directory):
+		DirAccess.remove_absolute(absolute_directory)
 
 func _test_visible_mirror_keyboard_flow(app: Node, router: InteractionRouter, dialogue: DialogueService, view: DialogueView, probe: UnhandledInputProbe) -> void:
 	var room := app.get_node_or_null("WorldHost/FoundationRoom") as MapScene
