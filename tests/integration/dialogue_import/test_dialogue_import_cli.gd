@@ -27,6 +27,7 @@ func run() -> void:
 	_test_warning_confirmation(cli, fixture_factory)
 	_test_failed_second_import_preserves_snapshot(cli, fixture_factory)
 	_test_korean_result_formatting(cli, fixture_factory)
+	_test_rejected_mappings_are_not_connections(cli, fixture_factory)
 	_test_process_exit_seams(fixture_factory)
 	_cleanup_exact_test_root()
 
@@ -229,6 +230,28 @@ func _test_process_exit_seams(fixture_factory: Script) -> void:
 	assert_eq(warning_harness.captured_exit_code, 1, "production _run terminates nonzero for unconfirmed warnings")
 	warning_harness.free()
 	_test_malformed_argument_rejection(harness_script, valid_dir)
+
+func _test_rejected_mappings_are_not_connections(cli: Script, fixture_factory: Script) -> void:
+	var input_dir := _test_root.path_join("rejected-mapping-input")
+	_make_dir(input_dir)
+	var proposed: Dictionary = _importable_bundle(fixture_factory)
+	proposed["triggers"][0]["events"][0]["conditions"][0]["mapping_status"] = "proposed"
+	_write_json(input_dir.path_join("bundle.json"), proposed)
+	var proposed_result: Dictionary = cli.run_import(input_dir, _test_root.path_join("rejected-mapping-output"), true)
+	var proposed_lines: Dictionary = cli.format_result_lines(proposed_result, true)
+	var proposed_output := "\n".join(proposed_lines.get("stdout", [])) + "\n" + "\n".join(proposed_lines.get("stderr", []))
+	assert_false(proposed_result.get("ok", true), "proposed mapping remains a blocking diagnostic")
+	assert_true(_has_issue(proposed_result, "mapping_not_approved"), "proposed mapping retains its stable diagnostic")
+	assert_false(proposed_output.contains("연결 · 거울을 자세히 봄 → mirror_seen"), "proposed mapping is never labeled as a successful connection")
+	var unknown: Dictionary = _importable_bundle(fixture_factory)
+	unknown["triggers"][0]["events"][0]["conditions"][0]["key"] = "invented_flag"
+	_write_json(input_dir.path_join("bundle.json"), unknown)
+	var unknown_result: Dictionary = cli.run_import(input_dir, _test_root.path_join("unknown-mapping-output"), true)
+	var unknown_lines: Dictionary = cli.format_result_lines(unknown_result, true)
+	var unknown_output := "\n".join(unknown_lines.get("stdout", [])) + "\n" + "\n".join(unknown_lines.get("stderr", []))
+	assert_false(unknown_result.get("ok", true), "unknown mapping remains a blocking diagnostic")
+	assert_true(_has_issue(unknown_result, "unknown_catalog_key"), "unknown mapping retains its stable diagnostic")
+	assert_false(unknown_output.contains("연결 · 거울을 자세히 봄 → invented_flag"), "unknown mapping is never labeled as a successful connection")
 
 func _test_malformed_argument_rejection(harness_script: Script, valid_dir: String) -> void:
 	var cases := [

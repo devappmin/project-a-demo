@@ -44,7 +44,7 @@ static func run_import(input_dir: String, output_dir: String, dry_run: bool, all
 	var bundles: Array[Dictionary] = loaded["bundles"]
 	var compiled := Compiler.compile_bundles(bundles)
 	compiled["counts"] = _count_bundles(bundles)
-	compiled["preview"] = _build_preview(bundles, compiled, output_dir)
+	compiled["preview"] = _build_preview(bundles, compiled, output_dir) if compiled.get("ok", false) else {"mappings":[], "changes":[]}
 	compiled["error"] = OK if compiled.get("ok", false) else ERR_INVALID_DATA
 	compiled["code"] = "validated" if compiled.get("ok", false) else "compilation_failed"
 	compiled["message"] = "대화 문서 검증이 완료되었습니다." if compiled.get("ok", false) else "대화 문서 검증에 실패했습니다. 오류를 수정한 뒤 다시 시도하세요."
