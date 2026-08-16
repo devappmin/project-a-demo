@@ -4,6 +4,10 @@ class_name DialogueAuthoringSchema
 static func validate_bundle(bundle: Dictionary, catalog: NarrativeCatalog, characters: Resource) -> Array[Dictionary]:
 	var issues: Array[Dictionary] = []
 	var context := _context(bundle)
+	_validate_allowed_fields(bundle, ["schema_version", "source_id", "source_url", "bundle_key", "title", "comments", "triggers"], "invalid_bundle", "bundle", context, issues)
+	var schema_version: Variant = bundle.get("schema_version", null)
+	if typeof(schema_version) not in [TYPE_INT, TYPE_FLOAT] or float(schema_version) != 1.0:
+		_add_issue(issues, "error", "unsupported_schema_version", "bundle schema_version must be numeric 1", context)
 	_validate_required_text(bundle, "source_id", context, issues)
 	_validate_required_text(bundle, "source_url", context, issues)
 	_validate_required_text(bundle, "bundle_key", context, issues)
@@ -42,6 +46,7 @@ static func _bundle_event_keys(triggers: Array, bundle_context: Dictionary, issu
 
 static func _validate_trigger(trigger: Dictionary, event_keys: Dictionary, catalog: NarrativeCatalog, characters: Resource, bundle_context: Dictionary, issues: Array[Dictionary]) -> void:
 	var context := _context(trigger, bundle_context)
+	_validate_allowed_fields(trigger, ["source_id", "source_url", "trigger_key", "name", "comments", "events"], "invalid_trigger", "trigger", context, issues)
 	_validate_required_text(trigger, "source_id", context, issues)
 	var trigger_key := String(trigger.get("trigger_key", ""))
 	if trigger_key.is_empty():
@@ -58,11 +63,15 @@ static func _validate_trigger(trigger: Dictionary, event_keys: Dictionary, catal
 			_validate_event(event_value, event_keys, catalog, characters, context, issues)
 		else:
 			_add_issue(issues, "error", "invalid_event", "event must be a dictionary", context)
-	if typeof(events_value[events_value.size() - 1]) == TYPE_DICTIONARY and not (events_value[events_value.size() - 1] as Dictionary).get("conditions", []).is_empty():
-		_add_issue(issues, "warning", "missing_fallback", "the final event should be an unconditional fallback", _context(events_value[events_value.size() - 1], context))
+	if typeof(events_value[events_value.size() - 1]) == TYPE_DICTIONARY:
+		var final_event: Dictionary = events_value[events_value.size() - 1]
+		var final_conditions: Variant = final_event.get("conditions", null)
+		if typeof(final_conditions) == TYPE_ARRAY and not (final_conditions as Array).is_empty():
+			_add_issue(issues, "warning", "missing_fallback", "the final event should be an unconditional fallback", _context(final_event, context))
 
 static func _validate_event(event: Dictionary, event_keys: Dictionary, catalog: NarrativeCatalog, characters: Resource, trigger_context: Dictionary, issues: Array[Dictionary]) -> void:
 	var context := _context(event, trigger_context)
+	_validate_allowed_fields(event, ["source_id", "source_url", "event_key", "name", "comments", "conditions", "effects", "flows"], "invalid_event", "event", context, issues)
 	_validate_required_text(event, "source_id", context, issues)
 	_validate_required_text(event, "event_key", context, issues)
 	_validate_mappings(event.get("conditions", null), true, catalog, context, issues)
@@ -100,6 +109,7 @@ static func _validate_event(event: Dictionary, event_keys: Dictionary, catalog: 
 
 static func _validate_flow(flow: Dictionary, flow_keys: Dictionary, event_keys: Dictionary, catalog: NarrativeCatalog, characters: Resource, event_context: Dictionary, issues: Array[Dictionary]) -> void:
 	var context := _context(flow, event_context)
+	_validate_allowed_fields(flow, ["source_id", "source_url", "flow_key", "name", "comments", "effects", "blocks"], "invalid_flow", "flow", context, issues)
 	_validate_required_text(flow, "source_id", context, issues)
 	_validate_mappings(flow.get("effects", null), false, catalog, context, issues)
 	var blocks_value: Variant = flow.get("blocks", null)
@@ -119,16 +129,20 @@ static func _validate_block(block: Dictionary, block_index: int, block_count: in
 	var type := String(block.get("type", ""))
 	match type:
 		"line":
+			_validate_allowed_fields(block, ["type", "source_id", "source_url", "block_key", "speaker", "expression", "text", "comments"], "invalid_line_block", "line block", context, issues)
 			_validate_line(block, characters, context, issues)
 			if block_index == block_count - 1:
 				_add_issue(issues, "error", "unterminated_path", "line must fall through to another block", context)
 		"command":
+			_validate_allowed_fields(block, ["type", "source_id", "source_url", "block_key", "command_key", "arguments", "comments"], "invalid_command_block", "command block", context, issues)
 			_validate_command(block, catalog, context, issues)
 			if block_index == block_count - 1:
 				_add_issue(issues, "error", "unterminated_path", "command must fall through to another block", context)
 		"choice":
+			_validate_allowed_fields(block, ["type", "source_id", "source_url", "block_key", "items", "comments"], "invalid_choice_block", "choice block", context, issues)
 			_validate_choice(block, flow_keys, event_keys, catalog, context, issues)
 		"jump":
+			_validate_allowed_fields(block, ["type", "source_id", "source_url", "block_key", "target_kind", "target_key", "comments"], "invalid_jump_block", "jump block", context, issues)
 			_validate_target(block, flow_keys, event_keys, context, issues)
 		"end":
 			_validate_end(block, context, issues)
@@ -161,6 +175,7 @@ static func _validate_choice(block: Dictionary, flow_keys: Dictionary, event_key
 			_add_issue(issues, "error", "invalid_choice_item", "choice item must be a dictionary", context)
 			continue
 		var item_context := _context(item_value, context)
+		_validate_allowed_fields(item_value, ["source_id", "source_url", "choice_key", "text", "comments", "conditions", "effects", "target_kind", "target_key"], "invalid_choice_item", "choice item", item_context, issues)
 		_validate_required_text(item_value, "source_id", item_context, issues)
 		if typeof(item_value.get("text", null)) != TYPE_STRING or String(item_value.get("text", "")).is_empty():
 			_add_issue(issues, "error", "missing_choice_text", "choice item requires text", item_context)
@@ -237,6 +252,7 @@ static func _validate_mappings(value: Variant, condition: bool, catalog: Narrati
 		if typeof(record_value) != TYPE_DICTIONARY:
 			_add_issue(issues, "error", "invalid_mapping", "condition or effect must be a dictionary", context)
 			continue
+		_validate_allowed_fields(record_value, ["source_id", "source_url", "source_text", "term_name", "mapping_status", "kind", "key", "operator", "value", "comments"] if condition else ["source_id", "source_url", "source_text", "term_name", "mapping_status", "kind", "key", "value", "comments"], "invalid_condition" if condition else "invalid_effect", "condition" if condition else "effect", _context(record_value, context), issues)
 		var result := catalog.validate_condition(record_value) if condition and catalog != null else catalog.validate_effect(record_value) if catalog != null else {"ok":false, "code":"invalid_catalog", "message":"narrative catalog is unavailable"}
 		if not result.get("ok", false):
 			_add_issue(issues, "error", String(result.get("code", "invalid_mapping")), String(result.get("message", "mapping is invalid")), context)
@@ -244,6 +260,11 @@ static func _validate_mappings(value: Variant, condition: bool, catalog: Narrati
 static func _validate_required_text(value: Dictionary, field: String, context: Dictionary, issues: Array[Dictionary]) -> void:
 	if typeof(value.get(field, null)) != TYPE_STRING or String(value.get(field, "")).strip_edges().is_empty():
 		_add_issue(issues, "error", "missing_%s" % field, "%s is required" % field, context)
+
+static func _validate_allowed_fields(value: Dictionary, allowed_fields: Array, code: String, record_name: String, context: Dictionary, issues: Array[Dictionary]) -> void:
+	for field: Variant in value.keys():
+		if field not in allowed_fields:
+			_add_issue(issues, "error", code, "%s contains unsupported field: %s" % [record_name, String(field)], context)
 
 static func _context(value: Dictionary, parent := {}) -> Dictionary:
 	return {"source_id":String(value.get("source_id", parent.get("source_id", ""))), "source_url":String(value.get("source_url", parent.get("source_url", ""))), "bundle_key":String(value.get("bundle_key", parent.get("bundle_key", ""))), "event_key":String(value.get("event_key", parent.get("event_key", ""))), "flow_key":String(value.get("flow_key", parent.get("flow_key", "")))}

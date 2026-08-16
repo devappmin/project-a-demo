@@ -22,6 +22,9 @@ static func compile_bundles(bundles: Array[Dictionary], catalog: NarrativeCatalo
 	if _has_errors(issues):
 		return _compile_result(graphs, event_bundles, source_entries, issues)
 	ordered_bundles.sort_custom(_bundle_less)
+	_validate_source_identity_uniqueness(ordered_bundles, issues)
+	if _has_errors(issues):
+		return _compile_result(graphs, event_bundles, source_entries, issues)
 	for bundle: Dictionary in ordered_bundles:
 		var schema_issues: Array[Dictionary] = AuthoringSchema.validate_bundle(bundle, local_catalog, local_characters)
 		issues.append_array(schema_issues)
@@ -314,6 +317,63 @@ static func _add_source(sources: Array[Dictionary], value: Dictionary, context: 
 	if not node_id.is_empty():
 		entry["node_id"] = node_id
 	sources.append(entry)
+
+static func _validate_source_identity_uniqueness(bundles: Array[Dictionary], issues: Array[Dictionary]) -> void:
+	var identities: Dictionary = {}
+	for bundle: Dictionary in bundles:
+		for record: Dictionary in _source_records(bundle):
+			var source_value: Variant = record.get("source_id", null)
+			if typeof(source_value) != TYPE_STRING:
+				continue
+			var source_id := String(source_value).strip_edges()
+			if source_id.is_empty():
+				continue
+			if identities.has(source_id):
+				issues.append(_issue("error", "duplicate_source_id", "source_id must be unique across the complete compile batch", _context(record, _context(bundle)), ""))
+			else:
+				identities[source_id] = true
+
+static func _source_records(bundle: Dictionary) -> Array[Dictionary]:
+	var records: Array[Dictionary] = [bundle]
+	var triggers_value: Variant = bundle.get("triggers", [])
+	if typeof(triggers_value) != TYPE_ARRAY:
+		return records
+	for trigger_value: Variant in triggers_value:
+		if typeof(trigger_value) != TYPE_DICTIONARY:
+			continue
+		var trigger: Dictionary = trigger_value
+		records.append(trigger)
+		var events_value: Variant = trigger.get("events", [])
+		if typeof(events_value) != TYPE_ARRAY:
+			continue
+		for event_value: Variant in events_value:
+			if typeof(event_value) != TYPE_DICTIONARY:
+				continue
+			var event: Dictionary = event_value
+			records.append(event)
+			var flows_value: Variant = event.get("flows", [])
+			if typeof(flows_value) != TYPE_ARRAY:
+				continue
+			for flow_value: Variant in flows_value:
+				if typeof(flow_value) != TYPE_DICTIONARY:
+					continue
+				var flow: Dictionary = flow_value
+				records.append(flow)
+				var blocks_value: Variant = flow.get("blocks", [])
+				if typeof(blocks_value) != TYPE_ARRAY:
+					continue
+				for block_value: Variant in blocks_value:
+					if typeof(block_value) != TYPE_DICTIONARY:
+						continue
+					var block: Dictionary = block_value
+					records.append(block)
+					var items_value: Variant = block.get("items", [])
+					if typeof(items_value) != TYPE_ARRAY:
+						continue
+					for item_value: Variant in items_value:
+						if typeof(item_value) == TYPE_DICTIONARY:
+							records.append(item_value)
+	return records
 
 static func _context(value: Dictionary, parent := {}) -> Dictionary:
 	return {

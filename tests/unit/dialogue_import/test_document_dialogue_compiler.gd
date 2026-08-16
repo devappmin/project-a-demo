@@ -23,6 +23,7 @@ func run() -> void:
 	_validate_reserved_artifact_collision(compiler, fixture, catalog, characters)
 	_validate_authored_synthetic_node_collision(compiler, fixture, catalog, characters)
 	_validate_structural_source_entries(compiler, fixture, catalog, characters)
+	_validate_compile_batch_source_identity_uniqueness(compiler, fixture, catalog, characters)
 	_validate_unreachable_flow_warning(compiler, fixture, catalog, characters)
 
 func _validate_complete_graph(compiler: Variant, fixture: Variant, catalog: Variant, characters: Resource) -> void:
@@ -178,6 +179,29 @@ func _validate_structural_source_entries(compiler: Variant, fixture: Variant, ca
 	assert_eq(_node_for_source(result["source_map"], "notion-event-default"), candidates[1]["entry_node"], "fallback event source maps to its generated event entry")
 	assert_eq(_node_for_source(result["source_map"], "notion-flow-start"), candidates[1]["entry_node"], "start flow source maps to its generated flow entry")
 	assert_eq(_node_for_source(result["source_map"], "notion-flow-inspect"), _node_for_source(result["source_map"], "notion-block-inspect"), "non-start flow source maps to its first generated node")
+	var unique_source_ids: Dictionary = {}
+	for entry_value: Variant in result["source_map"].get("sources", []):
+		var entry: Dictionary = entry_value
+		var source_id := String(entry.get("source_id", ""))
+		assert_false(unique_source_ids.has(source_id), "every durable source identity has exactly one source-map entry")
+		unique_source_ids[source_id] = true
+
+func _validate_compile_batch_source_identity_uniqueness(compiler: Variant, fixture: Variant, catalog: Variant, characters: Resource) -> void:
+	var first: Dictionary = fixture.valid_bundle()
+	var second: Dictionary = fixture.valid_bundle()
+	second["source_id"] = "notion-page-second"
+	second["source_url"] = "https://www.notion.so/second"
+	second["bundle_key"] = "foundation.second"
+	second["triggers"][0]["source_id"] = "notion-heading-second"
+	second["triggers"][0]["events"][0]["source_id"] = "notion-event-second-seen"
+	second["triggers"][0]["events"][1]["source_id"] = "notion-event-second-default"
+	second["triggers"][0]["events"][1]["flows"][0]["blocks"][0]["source_id"] = first["triggers"][0]["events"][1]["flows"][0]["blocks"][0]["source_id"]
+	var bundles: Array[Dictionary] = [first, second]
+	var result: Dictionary = compiler.compile_bundles(bundles, catalog, characters)
+	assert_false(result.get("ok", true), "duplicate durable source identities reject the complete compile batch")
+	assert_false(_issue_with_code(result.get("issues", []), "duplicate_source_id").is_empty(), "source identity collision has a stable diagnostic")
+	assert_true(result.get("graphs", {}).is_empty(), "a source identity collision produces no partial runtime graphs")
+	assert_true(result.get("source_map", {}).get("sources", []).is_empty(), "a source identity collision produces no ambiguous source-map entries")
 
 func _validate_unreachable_flow_warning(compiler: Variant, fixture: Variant, catalog: Variant, characters: Resource) -> void:
 	var bundle: Dictionary = fixture.valid_bundle()

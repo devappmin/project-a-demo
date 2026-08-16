@@ -16,9 +16,13 @@ func run() -> void:
 	var characters: Resource = load("res://data/characters/character_registry.tres")
 	var bundle: Dictionary = fixture.valid_bundle()
 	assert_eq(schema.validate_bundle(bundle, catalog, characters), [], "complete normalized bundle validates")
+	var json_bundle: Dictionary = bundle.duplicate(true)
+	json_bundle["schema_version"] = 1.0
+	assert_eq(schema.validate_bundle(json_bundle, catalog, characters), [], "JSON numeric schema version 1 validates")
 	_test_identity(identity)
 	_test_stable_identity_through_comments_and_renames(identity, schema, fixture, catalog, characters)
 	_test_contract_failures(schema, fixture, catalog, characters)
+	_test_fail_closed_shapes(schema, fixture, catalog, characters)
 	_test_same_bundle_cross_trigger_event_target(schema, fixture, characters)
 	_test_command_argument_contract(schema, fixture, characters)
 
@@ -48,6 +52,9 @@ func _test_stable_identity_through_comments_and_renames(identity: Script, schema
 	assert_eq(identity.stable_key("event", String(event["source_id"])), identity.stable_key("event", String(before["triggers"][0]["events"][1]["source_id"])), "source-derived event key survives title rename")
 
 func _test_contract_failures(schema: Script, fixture: Script, catalog: NarrativeCatalog, characters: Resource) -> void:
+	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle.erase("schema_version"), "unsupported_schema_version")
+	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["schema_version"] = "1", "unsupported_schema_version")
+	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["schema_version"] = 2, "unsupported_schema_version")
 	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][2]["name"] = bundle["triggers"][0]["events"][1]["flows"][1]["name"], "duplicate_flow_name")
 	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][2]["flow_key"] = "inspect", "duplicate_flow_key")
 	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["event_key"] = " ", "missing_event_key")
@@ -67,6 +74,25 @@ func _test_contract_failures(schema: Script, fixture: Script, catalog: Narrative
 	var warnings: Array = schema.validate_bundle(no_fallback, catalog, characters)
 	assert_true(_has_issue(warnings, "missing_fallback", "warning"), "final conditional event produces a missing-fallback warning")
 	assert_false(_has_error(warnings), "missing fallback is not an error")
+
+func _test_fail_closed_shapes(schema: Script, fixture: Script, catalog: NarrativeCatalog, characters: Resource) -> void:
+	var malformed_fallback: Dictionary = fixture.valid_bundle()
+	malformed_fallback["triggers"][0]["events"][1]["conditions"] = {"not":"an array"}
+	var fallback_issues: Array = schema.validate_bundle(malformed_fallback, catalog, characters)
+	assert_true(_has_issue(fallback_issues, "invalid_conditions", "error"), "non-array final-event conditions fail closed")
+	assert_false(_has_issue(fallback_issues, "missing_fallback", "warning"), "malformed conditions are never interpreted as a conditional fallback")
+
+	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["effects"] = [], "invalid_bundle")
+	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["effects"] = [], "invalid_trigger")
+	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][0]["arguments"] = {}, "invalid_event")
+	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][0]["flows"][0]["conditions"] = [], "invalid_flow")
+	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][0]["flows"][0]["blocks"][0]["effects"] = [], "invalid_line_block")
+	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][1]["blocks"][1]["effects"] = [], "invalid_command_block")
+	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][0]["blocks"][2]["effects"] = [], "invalid_choice_block")
+	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][2]["blocks"][1]["effects"] = [], "invalid_jump_block")
+	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["flows"][0]["blocks"][2]["items"][0]["speaker"] = "retti", "invalid_choice_item")
+	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][0]["conditions"][0]["target_key"] = "start", "invalid_condition")
+	_assert_issue(schema, fixture, catalog, characters, func(bundle: Dictionary): bundle["triggers"][0]["events"][1]["effects"][0]["operator"] = "eq", "invalid_effect")
 
 func _test_same_bundle_cross_trigger_event_target(schema: Script, fixture: Script, characters: Resource) -> void:
 	var bundle: Dictionary = fixture.valid_bundle()
