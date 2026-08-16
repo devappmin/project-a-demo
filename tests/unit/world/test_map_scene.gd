@@ -44,6 +44,29 @@ func run() -> void:
 	if map.has_method("validate_entry_names"):
 		var name_warnings: PackedStringArray = map.call("validate_entry_names", PackedStringArray(["", "start", "start"]))
 		assert_eq(name_warnings.size(), 2, "empty and duplicate entry marker names are both rejected")
+	var first_object := PersistentWorldObject.new()
+	first_object.object_id = &" mirror "
+	visual_sort.add_child(first_object)
+	var duplicate_object := PersistentWorldObject.new()
+	duplicate_object.object_id = &"mirror"
+	visual_sort.add_child(duplicate_object)
+	var duplicate_warnings := map.validate_contract()
+	assert_eq(duplicate_warnings.size(), 1, "off-tree map validation rejects trimmed duplicate persistent object IDs")
+	if not duplicate_warnings.is_empty():
+		assert_true(duplicate_warnings[0].contains("mirror"), "duplicate persistent object warning identifies the normalized ID")
+	assert_eq(map._get_configuration_warnings(), duplicate_warnings, "editor validation surfaces duplicate persistent object IDs")
+	var world_state := WorldState.new()
+	assert_eq(world_state.set_object(&"test_room", &"mirror", {"inspected": true}), OK, "duplicate fail-closed test seeds a literal world state")
+	var world_before := world_state.snapshot()
+	assert_eq(map.capture_world_objects(world_state), ERR_ALREADY_EXISTS, "capture rejects duplicate persistent object IDs before writing WorldState")
+	assert_eq(world_state.snapshot(), world_before, "duplicate capture leaves WorldState byte-equivalent")
+	assert_eq(map.apply_world_objects(world_state), ERR_ALREADY_EXISTS, "apply rejects duplicate persistent object IDs before mutating live objects")
+	assert_eq(first_object.capture_persisted_state(), {"inspected": false}, "duplicate apply leaves the first live object unchanged")
+	visual_sort.remove_child(duplicate_object)
+	duplicate_object.free()
+	first_object.object_id = &"  "
+	var empty_id_warnings := map.validate_contract()
+	assert_eq(empty_id_warnings.size(), 1, "off-tree map validation rejects a whitespace-only persistent object ID")
 	map.free()
 
 	var room_scene := load("res://content/maps/foundation_room.tscn") as PackedScene

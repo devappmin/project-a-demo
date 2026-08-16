@@ -38,6 +38,8 @@ func validate_registry() -> PackedStringArray:
 		var map_scene := map as MapScene
 		if map_scene.map_id != candidate.map_id:
 			warnings.append("Map definition ID does not match its scene: %s." % id)
+		for contract_warning: String in map_scene.validate_contract():
+			warnings.append(contract_warning)
 		if map_scene.get_spawn(candidate.default_spawn) == null:
 			warnings.append("Map definition default spawn is missing: %s." % candidate.default_spawn)
 		map_scene.free()

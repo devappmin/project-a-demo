@@ -26,6 +26,8 @@ func validate_contract() -> PackedStringArray:
 	warnings.append_array(validate_entry_names(entry_names))
 	if direct_marker_count == 0:
 		warnings.append("EntryPoints requires at least one direct Marker2D child.")
+	var persistent_registry := _persistent_world_object_registry()
+	warnings.append_array(persistent_registry["warnings"] as PackedStringArray)
 	return warnings
 
 func get_spawn(spawn_id: StringName) -> Marker2D:
@@ -46,8 +48,16 @@ func get_visual_root() -> Node2D:
 func capture_world_objects(world_state: WorldState) -> Error:
 	if world_state == null:
 		return ERR_INVALID_PARAMETER
-	for persistent_object in _persistent_world_objects():
-		var error := world_state.set_object(map_id, persistent_object.object_id, persistent_object.capture_persisted_state())
+	var persistent_registry := _persistent_world_object_registry()
+	if not persistent_registry.get("ok", false):
+		return persistent_registry.get("error", ERR_INVALID_DATA)
+	var objects: Dictionary = persistent_registry["objects"]
+	var object_ids := objects.keys()
+	object_ids.sort()
+	for object_id_value: Variant in object_ids:
+		var object_id := String(object_id_value)
+		var persistent_object := objects[object_id] as PersistentWorldObject
+		var error := world_state.set_object(map_id, StringName(object_id), persistent_object.capture_persisted_state())
 		if error != OK:
 			return error
 	return OK
@@ -55,8 +65,16 @@ func capture_world_objects(world_state: WorldState) -> Error:
 func apply_world_objects(world_state: WorldState) -> Error:
 	if world_state == null:
 		return ERR_INVALID_PARAMETER
-	for persistent_object in _persistent_world_objects():
-		var state := world_state.get_object(map_id, persistent_object.object_id)
+	var persistent_registry := _persistent_world_object_registry()
+	if not persistent_registry.get("ok", false):
+		return persistent_registry.get("error", ERR_INVALID_DATA)
+	var objects: Dictionary = persistent_registry["objects"]
+	var object_ids := objects.keys()
+	object_ids.sort()
+	for object_id_value: Variant in object_ids:
+		var object_id := String(object_id_value)
+		var persistent_object := objects[object_id] as PersistentWorldObject
+		var state := world_state.get_object(map_id, StringName(object_id))
 		if state.is_empty():
 			continue
 		var error := persistent_object.apply_persisted_state(state)
@@ -64,11 +82,26 @@ func apply_world_objects(world_state: WorldState) -> Error:
 			return error
 	return OK
 
-func _persistent_world_objects() -> Array[PersistentWorldObject]:
-	var objects: Array[PersistentWorldObject] = []
+func _persistent_world_object_registry() -> Dictionary:
+	var objects := {}
+	var warnings := PackedStringArray()
+	var error: Error = OK
 	for node in find_children("*", "PersistentWorldObject", true, false):
-		objects.append(node as PersistentWorldObject)
-	return objects
+		var persistent_object := node as PersistentWorldObject
+		if persistent_object == null:
+			continue
+		var object_id := String(persistent_object.object_id).strip_edges()
+		if object_id.is_empty():
+			warnings.append("Persistent objects require a nonempty object_id.")
+			if error == OK:
+				error = ERR_INVALID_PARAMETER
+		elif objects.has(object_id):
+			warnings.append("Persistent object IDs must be unique: %s." % object_id)
+			if error == OK:
+				error = ERR_ALREADY_EXISTS
+		else:
+			objects[object_id] = persistent_object
+	return {"ok": error == OK, "error": error, "objects": objects, "warnings": warnings}
 
 func validate_entry_names(entry_names: PackedStringArray) -> PackedStringArray:
 	var warnings := PackedStringArray()

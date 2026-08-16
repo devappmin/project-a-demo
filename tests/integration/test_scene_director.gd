@@ -9,6 +9,7 @@ func run() -> void:
 	assert_not_null(fade_script, "ScreenFade script exists")
 	if director_script == null or fade_script == null:
 		return
+	await _test_duplicate_persistent_restore_rejection(director_script, fade_script)
 	var harness := await _make_harness(director_script, fade_script)
 	if harness.is_empty():
 		return
@@ -271,6 +272,62 @@ func _make_harness(director_script: Script, fade_script: Script) -> Dictionary:
 	GameSession.reset_new_game()
 	GameSession.change_mode(GameModeResource.Value.MENU)
 	return {"container": container, "director": director, "host": host, "fade": fade}
+
+func _test_duplicate_persistent_restore_rejection(director_script: Script, fade_script: Script) -> void:
+	var harness := await _make_harness(director_script, fade_script)
+	if harness.is_empty():
+		return
+	var director: Variant = harness["director"]
+	var host: Node2D = harness["host"]
+	assert_eq(await director.start_new_game(&"foundation_room", &"start"), OK, "duplicate restore test starts from a real stable map")
+	var old_map := director.get_current_map() as MapScene
+	var old_player := director.get_player() as PlayerController
+	if old_map == null or old_player == null:
+		await _cleanup_harness(harness)
+		return
+	assert_eq(GameSession.world_state.set_object(&"foundation_room", &"mirror", {"inspected": true}), OK, "duplicate restore test seeds existing WorldState")
+	var old_world := GameSession.world_state.snapshot()
+	var old_mode := GameSession.current_mode
+	var old_player_parent := old_player.get_parent()
+	var old_visual_parent := old_player.presentation.get_parent()
+	var shipped_registry: MapRegistry = director.map_registry
+	var duplicate_definition := MapDefinition.new()
+	duplicate_definition.map_id = &"duplicate_persistent"
+	duplicate_definition.scene_path = "res://tests/fixtures/duplicate_persistent_map.tscn"
+	duplicate_definition.default_spawn = &"start"
+	duplicate_definition.display_name = "Duplicate Persistent"
+	var duplicate_registry := MapRegistry.new()
+	duplicate_registry.definitions = [duplicate_definition]
+	director.map_registry = duplicate_registry
+	var duplicate_plan: Dictionary = director.prepare_restore(&"duplicate_persistent", &"start")
+	assert_false(duplicate_plan.get("ok", false), "prepare_restore rejects an off-tree candidate with duplicate persistent object IDs")
+	assert_eq(duplicate_plan.get("error"), ERR_INVALID_DATA, "duplicate prepare_restore returns an explicit closed error")
+	if duplicate_plan.get("ok", false):
+		(duplicate_plan.get("map") as MapScene).free()
+	_assert_preserved_world(director, host, old_map, old_player, old_player_parent, old_visual_parent, old_mode, old_world, "prepare_restore")
+	director.map_registry = shipped_registry
+	var mutated_plan: Dictionary = director.prepare_restore(&"foundation_hall", &"start")
+	assert_true(mutated_plan.get("ok", false), "commit duplicate test begins with a valid prepared candidate")
+	if mutated_plan.get("ok", false):
+		var candidate := mutated_plan.get("map") as MapScene
+		var first_duplicate := PersistentWorldObject.new()
+		first_duplicate.object_id = &"collision"
+		candidate.get_visual_root().add_child(first_duplicate)
+		var second_duplicate := PersistentWorldObject.new()
+		second_duplicate.object_id = &" collision "
+		candidate.get_visual_root().add_child(second_duplicate)
+		assert_eq(await director.commit_restore(mutated_plan), ERR_INVALID_DATA, "commit_restore revalidates and rejects a candidate mutated to contain duplicate persistent IDs")
+	_assert_preserved_world(director, host, old_map, old_player, old_player_parent, old_visual_parent, old_mode, old_world, "commit_restore")
+	await _cleanup_harness(harness)
+
+func _assert_preserved_world(director: Node, host: Node2D, old_map: MapScene, old_player: PlayerController, old_player_parent: Node, old_visual_parent: Node, old_mode: int, old_world: Dictionary, stage: String) -> void:
+	assert_eq(director.get_current_map(), old_map, "%s duplicate rejection preserves the exact current map" % stage)
+	assert_eq(host.get_child_count(), 1, "%s duplicate rejection preserves one current world" % stage)
+	assert_eq(director.get_player(), old_player, "%s duplicate rejection preserves the exact player" % stage)
+	assert_eq(old_player.get_parent(), old_player_parent, "%s duplicate rejection preserves the player body parent" % stage)
+	assert_eq(old_player.presentation.get_parent(), old_visual_parent, "%s duplicate rejection preserves the player visual parent" % stage)
+	assert_eq(GameSession.current_mode, old_mode, "%s duplicate rejection preserves the mode" % stage)
+	assert_eq(GameSession.world_state.snapshot(), old_world, "%s duplicate rejection preserves WorldState" % stage)
 
 func _cleanup_harness(harness: Dictionary) -> void:
 	var container := harness.get("container") as Node

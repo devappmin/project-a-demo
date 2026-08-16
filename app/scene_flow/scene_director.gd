@@ -127,6 +127,10 @@ func commit_restore(plan: Dictionary) -> Error:
 	var candidate := plan.get("map") as MapScene
 	if candidate == null or _world_host == null:
 		return ERR_INVALID_PARAMETER
+	if not candidate.validate_contract().is_empty():
+		if candidate != _current_map and candidate.get_parent() == null:
+			candidate.free()
+		return ERR_INVALID_DATA
 	_last_restore_failure_context.clear()
 	var previous_mode_context := GameSession.snapshot_mode_context()
 	var old_map := _current_map

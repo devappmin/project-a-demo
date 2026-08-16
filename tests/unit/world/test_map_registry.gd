@@ -32,11 +32,16 @@ func run() -> void:
 	missing_spawn.map_id = &"foundation_hall"
 	missing_spawn.scene_path = "res://content/maps/foundation_hall.tscn"
 	missing_spawn.default_spawn = &"not_here"
+	var duplicate_objects: Variant = definition_script.new()
+	duplicate_objects.map_id = &"duplicate_persistent"
+	duplicate_objects.scene_path = "res://tests/fixtures/duplicate_persistent_map.tscn"
+	duplicate_objects.default_spawn = &"start"
 
-	var definitions: Array[MapDefinition] = [room as MapDefinition, duplicate as MapDefinition, missing_scene as MapDefinition, wrong_root as MapDefinition, missing_spawn as MapDefinition]
+	var definitions: Array[MapDefinition] = [room as MapDefinition, duplicate as MapDefinition, missing_scene as MapDefinition, wrong_root as MapDefinition, missing_spawn as MapDefinition, duplicate_objects as MapDefinition]
 	registry.definitions = definitions
 	var warnings: PackedStringArray = registry.validate_registry()
-	assert_eq(warnings.size(), 5, "registry rejects duplicate IDs, missing scenes, wrong roots, scene ID mismatches, and missing default spawns")
+	assert_eq(warnings.size(), 6, "registry rejects duplicate IDs, missing scenes, wrong roots, scene ID mismatches, missing default spawns, and invalid persistent object contracts")
+	assert_true(_warnings_contain(warnings, "Persistent object IDs must be unique: mirror"), "registry validation surfaces duplicate persistent object IDs from off-tree map scenes")
 	assert_eq(registry.definition(&"foundation_room"), room, "definition lookup returns the registered resource")
 	assert_eq(registry.definition(&"not_registered"), null, "unknown definitions return null")
 
@@ -52,3 +57,9 @@ func run() -> void:
 		assert_not_null(shipped_hall, "the shipped registry resolves foundation hall")
 		if shipped_hall != null:
 			assert_eq(shipped_hall.display_name, "기초 홀", "hall display name matches shipped Korean slot metadata")
+
+func _warnings_contain(warnings: PackedStringArray, fragment: String) -> bool:
+	for warning: String in warnings:
+		if warning.contains(fragment):
+			return true
+	return false

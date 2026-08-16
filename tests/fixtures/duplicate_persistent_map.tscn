@@ -1,0 +1,26 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://game/world/map_scene.gd" id="1_map"]
+[ext_resource type="Script" path="res://game/world/persistent_world_object.gd" id="2_persistent"]
+
+[node name="DuplicatePersistentMap" type="Node2D"]
+script = ExtResource("1_map")
+map_id = &"duplicate_persistent"
+room_bounds = Rect2(0, 0, 320, 192)
+
+[node name="EntryPoints" type="Node2D" parent="."]
+
+[node name="start" type="Marker2D" parent="EntryPoints"]
+position = Vector2(160, 112)
+
+[node name="Actors" type="Node2D" parent="."]
+
+[node name="VisualSort" type="Node2D" parent="."]
+
+[node name="FirstMirror" type="Node" parent="VisualSort"]
+script = ExtResource("2_persistent")
+object_id = &"mirror"
+
+[node name="DuplicateMirror" type="Node" parent="VisualSort"]
+script = ExtResource("2_persistent")
+object_id = &" mirror "
