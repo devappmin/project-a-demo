@@ -21,21 +21,52 @@ REQUIRED_FILES = (
     Path("app/bootstrap/app_root.tscn"),
 )
 FAILURE_PATTERNS = (
-    re.compile(r"SCRIPT ERROR:"),
-    re.compile(r"ERROR:\s+(?:Failed to load script|Cannot load source code)"),
-    re.compile(r"Detected another project\.godot"),
-    re.compile(r"^TEST FAILURE:", re.MULTILINE),
+    re.compile(r"^.*SCRIPT ERROR:.*$", re.MULTILINE),
+    re.compile(r"^.*ERROR:\s+(?:Failed to load script|Cannot load source code).*$", re.MULTILINE),
+    re.compile(r"^.*Detected another project\.godot.*$", re.MULTILINE),
+    re.compile(r"^TEST FAILURE:.*$", re.MULTILINE),
 )
 SELECTED_PATTERN = re.compile(r"Selected\s+([1-9][0-9]*)\s+test suite\(s\)\.")
 COMPLETED_PATTERN = re.compile(r"Completed\s+([1-9][0-9]*)\s+test suite\(s\)\.")
 VERSION_PATTERN = re.compile(
     r"^(?:Godot Engine v)?([0-9]+)\.([0-9]+)(?:\.[0-9A-Za-z][0-9A-Za-z._-]*)?$"
 )
+CLASS_CACHE_ENTRY_PATTERN = re.compile(
+    r'\s*"base"\s*:\s*&"[^"]+"\s*,'
+    r'\s*"class"\s*:\s*&"[^"]+"\s*,'
+    r'\s*"icon"\s*:\s*"[^"]*"\s*,'
+    r'\s*"is_abstract"\s*:\s*(?:true|false)\s*,'
+    r'\s*"is_tool"\s*:\s*(?:true|false)\s*,'
+    r'\s*"language"\s*:\s*&"GDScript"\s*,'
+    r'\s*"path"\s*:\s*"res://[^"]+"\s*',
+    re.DOTALL,
+)
+SECRET_ASSIGNMENT_PATTERN = re.compile(
+    r"(?P<prefix>\b[A-Za-z0-9_]*(?:token|secret|password)[A-Za-z0-9_]*\s*[:=]\s*)"
+    r"(?P<value>[^\s]+)",
+    re.IGNORECASE,
+)
+SECRET_FLAG_PATTERN = re.compile(
+    r"(?P<prefix>--(?:token|secret|password)\s+)(?P<value>[^\s]+)",
+    re.IGNORECASE,
+)
 CHECK_ORDER = ("doctor", "python-tests", "test", "editor", "boot")
 
 
 class ProjectToolError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        stage: str = "doctor",
+        arguments: Sequence[str] = (),
+        original_returncode: Optional[int] = None,
+        output: str = "",
+    ) -> None:
+        super().__init__(message)
+        self.stage = stage
+        self.arguments = tuple(arguments)
+        self.original_returncode = original_returncode
+        self.output = output
 
 
 @dataclass(frozen=True)
@@ -129,7 +160,7 @@ def run_checked(
     for pattern in FAILURE_PATTERNS:
         match = pattern.search(output)
         if match is not None:
-            failure_reason = match.group(0)
+            failure_reason = match.group(0).strip()
             break
     if completed.returncode != 0:
         return CommandResult(
@@ -190,9 +221,7 @@ def needs_class_scan(project_root: Path) -> bool:
     if not entries or re.fullmatch(r"list\s*=\s*\[\s*\{\}(?:\s*,\s*\{\})*\s*\]", structure) is None:
         return True
     for entry in entries:
-        if re.search(r'"class"\s*:\s*&"[^"]+"', entry) is None:
-            return True
-        if re.search(r'"path"\s*:\s*"res://[^"]+"', entry) is None:
+        if CLASS_CACHE_ENTRY_PATTERN.fullmatch(entry) is None:
             return True
     return False
 
@@ -206,7 +235,11 @@ def test_arguments(project_root: Path, selected_filter: str) -> List[str]:
 
 def redact(text: str) -> str:
     home = str(Path.home())
-    return text.replace(home, "~") if home else text
+    redacted = text.replace(home, "~") if home else text
+    redacted = SECRET_ASSIGNMENT_PATTERN.sub(
+        lambda match: match.group("prefix") + "<redacted>", redacted
+    )
+    return SECRET_FLAG_PATTERN.sub(lambda match: match.group("prefix") + "<redacted>", redacted)
 
 
 def safe_arguments(arguments: Sequence[str]) -> Tuple[str, ...]:
@@ -255,14 +288,18 @@ def emit(result: CommandResult) -> int:
     return result.returncode
 
 
-def validate_environment(godot: str, project_root: Path = REPO_ROOT) -> None:
+def validate_environment(
+    godot: str,
+    project_root: Path = REPO_ROOT,
+    process_runner: Callable = subprocess.run,
+) -> None:
     if sys.version_info < MIN_PYTHON:
         raise ProjectToolError("Python 3.9 or newer is required.")
     missing = [str(path) for path in REQUIRED_FILES if not (project_root / path).is_file()]
     if missing:
         raise ProjectToolError("Missing required project files: " + ", ".join(missing))
     try:
-        completed = subprocess.run(
+        completed = process_runner(
             [godot, "--version"],
             cwd=str(project_root),
             stdout=subprocess.PIPE,
@@ -273,17 +310,36 @@ def validate_environment(godot: str, project_root: Path = REPO_ROOT) -> None:
             check=False,
         )
     except OSError as error:
-        raise ProjectToolError(f"Could not start Godot: {error.__class__.__name__}.") from error
+        raise ProjectToolError(
+            f"Could not start Godot: {error.__class__.__name__}.",
+            arguments=("--version",),
+        ) from error
     if completed.returncode != 0:
-        raise ProjectToolError(f"Godot --version returned exit code {completed.returncode}.")
-    require_supported_godot(completed.stdout or "")
+        raise ProjectToolError(
+            f"Godot --version returned exit code {completed.returncode}.",
+            arguments=("--version",),
+            original_returncode=completed.returncode,
+            output=completed.stdout or "",
+        )
+    try:
+        require_supported_godot(completed.stdout or "")
+    except ProjectToolError as error:
+        raise ProjectToolError(
+            str(error),
+            arguments=("--version",),
+            original_returncode=completed.returncode,
+            output=completed.stdout or "",
+        ) from error
 
 
 def doctor(godot: str, project_root: Path = REPO_ROOT) -> int:
     validate_environment(godot, project_root)
-    print(f"Python: {sys.version_info.major}.{sys.version_info.minor}")
-    print("Godot: 4.7")
-    print(f"Repository: {project_root.name}")
+    write_terminal(
+        sys.stdout,
+        f"Python: {sys.version_info.major}.{sys.version_info.minor}\n"
+        "Godot: 4.7\n"
+        f"Repository: {project_root.name}\n",
+    )
     return 0
 
 
@@ -430,7 +486,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 return exit_code
         return 0
     except ProjectToolError as error:
-        return emit(CommandResult(2, "", str(error), "doctor", (), None))
+        return emit(
+            CommandResult(
+                2,
+                error.output,
+                str(error),
+                error.stage,
+                error.arguments,
+                error.original_returncode,
+            )
+        )
 
 
 if __name__ == "__main__":

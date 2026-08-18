@@ -105,11 +105,11 @@ class ProjectToolTests(unittest.TestCase):
     def test_nonzero_engine_exit_reports_the_detected_failure_line(self):
         tool = load_project_tool()
         runner = Mock(
-            return_value=subprocess.CompletedProcess([], 7, "TEST FAILURE: expected true\n")
+            return_value=subprocess.CompletedProcess([], 7, "TEST FAILURE: expected true, got false\n")
         )
         result = tool.run_checked("godot", ["--headless"], REPO_ROOT, process_runner=runner)
         self.assertEqual(result.returncode, 7)
-        self.assertIn("TEST FAILURE", result.reason)
+        self.assertEqual(result.reason, "TEST FAILURE: expected true, got false")
 
     def test_test_command_requires_a_nonzero_selected_suite_count(self):
         tool = load_project_tool()
@@ -171,7 +171,15 @@ class ProjectToolTests(unittest.TestCase):
             cache.write_text("list=[]\n", encoding="utf-8")
             self.assertTrue(tool.needs_class_scan(root))
             cache.write_text(
-                'list=[{ "class": &"FreshBase", "path": "res://fresh_base.gd" }]\n',
+                'list=[{\n'
+                '"base": &"RefCounted",\n'
+                '"class": &"FreshBase",\n'
+                '"icon": "",\n'
+                '"is_abstract": false,\n'
+                '"is_tool": false,\n'
+                '"language": &"GDScript",\n'
+                '"path": "res://fresh_base.gd"\n'
+                '}]\n',
                 encoding="utf-8",
             )
             self.assertFalse(tool.needs_class_scan(root))
@@ -195,6 +203,19 @@ class ProjectToolTests(unittest.TestCase):
             cache.parent.mkdir()
             cache.write_text('list=[{ "class": &"FreshBase" }]\n', encoding="utf-8")
             self.assertTrue(tool.needs_class_scan(Path(temp)))
+
+    def test_class_and_path_only_or_garbage_class_cache_entry_needs_scan(self):
+        tool = load_project_tool()
+        with tempfile.TemporaryDirectory() as temp:
+            cache = Path(temp) / ".godot" / "global_script_class_cache.cfg"
+            cache.parent.mkdir()
+            for content in (
+                'list=[{ "class": &"FreshBase", "path": "res://fresh.gd" }]\n',
+                'list=[{ "class": &"FreshBase", "path": "res://fresh.gd", garbage }]\n',
+            ):
+                with self.subTest(content=content):
+                    cache.write_text(content, encoding="utf-8")
+                    self.assertTrue(tool.needs_class_scan(Path(temp)))
 
     def test_failure_diagnostics_include_stage_safe_arguments_and_original_exit(self):
         tool = load_project_tool()
@@ -232,6 +253,29 @@ class ProjectToolTests(unittest.TestCase):
         self.assertIn("Original exit code: 9", rendered)
         self.assertNotIn(home, rendered)
 
+    def test_captured_output_redacts_named_secret_values(self):
+        tool = load_project_tool()
+        runner = Mock(
+            return_value=subprocess.CompletedProcess(
+                [],
+                9,
+                "PROJECT_A_NOTION_TOKEN=token-value\npassword: password-value\n--secret secret-value\n",
+            )
+        )
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            tool.run_python_tests("godot", REPO_ROOT, process_runner=runner)
+        rendered = stdout.getvalue() + stderr.getvalue()
+        for secret in ("token-value", "password-value", "secret-value"):
+            self.assertNotIn(secret, rendered)
+        self.assertIn("<redacted>", rendered)
+
+    def test_redaction_preserves_non_assignment_secret_words(self):
+        tool = load_project_tool()
+        message = "test_secrets (suite) and secret handling passed\n"
+        self.assertEqual(tool.redact(message), message)
+
     def test_emit_replaces_characters_unsupported_by_terminal_encoding(self):
         tool = load_project_tool()
         raw = io.BytesIO()
@@ -242,6 +286,28 @@ class ProjectToolTests(unittest.TestCase):
         rendered = raw.getvalue().decode("ascii")
         self.assertEqual(exit_code, 0)
         self.assertIn("engine output: ?", rendered)
+
+    def test_doctor_uses_safe_terminal_output(self):
+        tool = load_project_tool()
+        raw = io.BytesIO()
+        terminal = io.TextIOWrapper(raw, encoding="ascii", errors="strict")
+        with patch.object(tool, "validate_environment", return_value=None), redirect_stdout(terminal):
+            exit_code = tool.doctor("godot", Path("repository-\ufffd"))
+            terminal.flush()
+        rendered = raw.getvalue().decode("ascii")
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Repository: repository-?", rendered)
+
+    def test_doctor_version_failure_keeps_arguments_and_original_exit(self):
+        tool = load_project_tool()
+        runner = Mock(return_value=subprocess.CompletedProcess([], 7, "version failed\n"))
+        with self.assertRaises(tool.ProjectToolError) as raised:
+            tool.validate_environment("godot", REPO_ROOT, process_runner=runner)
+        error = raised.exception
+        self.assertEqual(error.stage, "doctor")
+        self.assertEqual(error.arguments, ("--version",))
+        self.assertEqual(error.original_returncode, 7)
+        self.assertIn("version failed", error.output)
 
     def test_safe_arguments_hide_inline_and_separate_secret_values(self):
         tool = load_project_tool()
