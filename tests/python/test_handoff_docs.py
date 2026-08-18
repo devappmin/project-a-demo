@@ -52,3 +52,10 @@ class HandoffDocumentTests(unittest.TestCase):
     def test_gitignore_ignores_python_bytecode_caches_repository_wide(self):
         gitignore = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
         self.assertIn("__pycache__/", gitignore.splitlines())
+
+    def test_readme_covers_new_computer_setup_without_machine_specific_paths(self):
+        readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+        for required in ("Git", "clone", "project-a-demo", "PROJECT_A_GODOT_BIN", "project.godot"):
+            with self.subTest(required=required):
+                self.assertIn(required, readme)
+        self.assertNotIn("<repository-url>", readme)

@@ -25,7 +25,8 @@
 
 ## 표준 검증
 
-- 가장 좁은 관련 `python tools/project.py test --filter ...`를 먼저 실행한다.
+- Godot 코드와 씬은 가장 좁은 관련 `python tools/project.py test --filter ...`를 먼저 실행한다.
+- Python 도구와 문서는 관련 `python -m unittest tests/python/test_파일.py -v`를 먼저 실행한다.
 - 완료 전에는 `python tools/project.py check`를 실행한다.
 
 ## Godot 프로젝트 불변조건

@@ -8,23 +8,32 @@ Godot 4.7 기반 2D 픽셀 탑다운 어드벤처 게임입니다. 이동과 상
 
 ## 요구 사항
 
+- Git
 - Python 3.9 이상 (`python3`는 `python`을 대신할 수 있음)
 - Godot 4.7
 
 ## 처음 실행하기
 
-프로젝트 루트에서 환경을 확인한 뒤 검증을 실행합니다.
+저장소를 clone한 뒤 프로젝트 루트로 이동해 환경을 확인하고 검증합니다.
+
+사용할 Git 호스트에서 저장소를 clone한 다음 아래처럼 이동합니다.
+
+```bash
+cd project-a-demo
+```
 
 ```bash
 python tools/project.py doctor
 python tools/project.py check
 ```
 
-Godot 실행 파일을 자동으로 찾지 못하면 한 번만 직접 지정할 수 있습니다.
+Godot 실행 파일을 자동으로 찾지 못하면 `--godot`으로 직접 지정하거나 `PROJECT_A_GODOT_BIN` 환경변수에 같은 경로를 설정합니다.
 
 ```bash
 python tools/project.py check --godot /path/to/godot
 ```
+
+검증이 끝나면 Godot 4.7 editor에서 루트의 `project.godot`을 엽니다. 현재 구현 범위와 다음 작업은 아래의 프로젝트 현재 상태와 로드맵부터 확인합니다.
 
 ## 조작법
 

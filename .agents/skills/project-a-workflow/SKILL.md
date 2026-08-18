@@ -1,6 +1,6 @@
 ---
 name: project-a-workflow
-description: Work safely in the Project A Godot 4.7 repository. Use for gameplay code, dialogue and branching content, save/map/interaction systems, tests, project verification, milestones, documentation, or handoff work in project-a-demo. Do not use for the deprecated project-a repository.
+description: Use when working on gameplay, dialogue and branching content, save/map/interaction systems, tests, project verification, milestones, documentation, or handoff in the Project A Godot 4.7 project-a-demo repository. Do not use for the deprecated project-a repository.
 ---
 
 # Project A Workflow
@@ -28,7 +28,8 @@ description: Work safely in the Project A Godot 4.7 repository. Use for gameplay
 
 ## Verify and hand off
 
-1. Run the narrowest relevant filter: use `--filter dialogue` for dialogue work, `--filter save_` for save work, or the changed test filename stem for another subsystem.
-2. Run `python tools/project.py check` before claiming completion.
-3. Update the tracked source that owns any changed fact: status, roadmap, architecture, or authoring guide.
-4. Report the commit, verification result, and any manual acceptance still required.
+1. For Godot code or scenes, run the narrowest `python tools/project.py test --filter ...`: use `dialogue` for dialogue work and `save_` for save work.
+2. For Python tooling or documentation, run the relevant `python -m unittest tests/python/test_file.py -v` module instead of a Godot filter.
+3. Run `python tools/project.py check` before claiming completion.
+4. Update the tracked source that owns any changed fact: status, roadmap, architecture, or authoring guide.
+5. Report the commit, verification result, and any manual acceptance still required.

@@ -32,5 +32,6 @@ func _run() -> void:
 			failures.append(path + ": " + failure)
 		suite.queue_free()
 	for failure in failures:
-		printerr(failure)
+		printerr("TEST FAILURE: %s" % failure)
+	print("Completed %d test suite(s)." % selected_paths.size())
 	quit(1 if not failures.is_empty() else 0)
